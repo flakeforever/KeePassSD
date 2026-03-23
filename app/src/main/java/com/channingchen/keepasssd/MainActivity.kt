@@ -1220,28 +1220,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         color = colors.textSecondary,
                         fontSize = 12.sp
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Flakeforever",
-                            color = colors.textPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.Favorite,
-                            contentDescription = "with",
-                            tint = colors.accent,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "AI",
-                            color = colors.textPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    Text(
+                        "Flakeforever 🤝 AI",
+                        color = colors.textPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
