@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
             KeePassSDTheme {
                 val viewModel: MainViewModel = viewModel()
                 val unlockState by viewModel.unlockState.collectAsState()
+                val showSettings by viewModel.showSettings.collectAsState()
                 
                 var currentScreen by remember { mutableStateOf("Unlock") }
 
@@ -57,7 +58,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (currentScreen == "Main") {
+                if (showSettings) {
+                    SettingsScreen(viewModel = viewModel)
+                } else if (currentScreen == "Main") {
                     MainScreen(
                         viewModel = viewModel,
                         onNavigateToUnlock = { 
@@ -173,7 +176,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                 // Restored Settings Button
                 NeumorphicIconButton(
                     icon = Icons.Default.Settings,
-                    onClick = { /* TODO */ }
+                    onClick = { viewModel.toggleSettings(true) }
                 )
             }
             
@@ -730,7 +733,7 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                 // Keep Settings Button
                 NeumorphicIconButton(
                     icon = Icons.Default.Settings,
-                    onClick = { /* Settings */ }
+                    onClick = { viewModel.toggleSettings(true) }
                 )
             }
 
@@ -1062,5 +1065,185 @@ fun FileSelectRow(
                 uncheckedBorderColor = colors.darkShadow
             )
         )
+    }
+}
+@Composable
+fun SettingsScreen(viewModel: MainViewModel) {
+    val colors = LocalNeumorphicColors.current
+    val diagnosticResult by viewModel.diagnosticResult.collectAsState()
+    
+    val hwTestLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val responseBytes = result.data?.getByteArrayExtra("response")
+            if (responseBytes != null) {
+                val hexStr = responseBytes.joinToString("") { "%02x".format(it) }
+                viewModel.setDiagnosticResult("Success! HMAC-SHA1 Response:\n$hexStr")
+            } else {
+                viewModel.setDiagnosticResult("Failed: Null response signature.")
+            }
+        } else {
+            viewModel.setDiagnosticResult("Cancelled or failed.")
+        }
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = colors.background
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 24.dp)
+        ) {
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                NeumorphicIconButton(
+                    icon = Icons.Default.ArrowBack,
+                    onClick = { viewModel.toggleSettings(false) }
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                EngravedText(
+                    text = "Settings",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            // DIAGNOSTICS SECTION
+            Text("Hardware Diagnostics", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            NeumorphicCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 16.dp,
+                innerPadding = 16.dp
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Test YubiKey connection by sending a ping challenge to the Driver overlay.",
+                        color = colors.textSecondary,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    NeumorphicButton(
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        onClick = {
+                            viewModel.setDiagnosticResult("Awaiting physical hardware key...")
+                            val dummyChallenge = "KeePassSD_Ping".toByteArray(Charsets.UTF_8)
+                            val paddedChallenge = ByteArray(32) { i -> if (i < dummyChallenge.size) dummyChallenge[i] else 0x0 }
+                            
+                            val intent = android.content.Intent("android.yubikey.intent.action.CHALLENGE_RESPONSE")
+                            intent.putExtra("challenge", paddedChallenge)
+                            intent.putExtra("purpose", "KeePassSD Diagnostics")
+                            
+                            try {
+                                hwTestLauncher.launch(intent)
+                            } catch (e: android.content.ActivityNotFoundException) {
+                                try {
+                                    intent.action = "net.pp3345.ykdroid.intent.action.CHALLENGE_RESPONSE"
+                                    hwTestLauncher.launch(intent)
+                                } catch (e2: android.content.ActivityNotFoundException) {
+                                    viewModel.setDiagnosticResult("Driver Not Installed! Please install KeePassDX Key Driver / ykDroid.")
+                                }
+                            }
+                        },
+                        innerPadding = 0.dp
+                    ) {
+                        Text("Test Hardware Key", color = colors.textPrimary, fontWeight = FontWeight.Bold)
+                    }
+                    
+                    if (diagnosticResult.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        NeumorphicCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = 8.dp,
+                            innerPadding = 12.dp,
+                            isPressed = true,
+                            backgroundColor = colors.background.copy(alpha = 0.5f)
+                        ) {
+                            Text(
+                                diagnosticResult,
+                                color = if (diagnosticResult.startsWith("Success")) Color(0xFF4CAF50) else colors.textSecondary,
+                                fontSize = 13.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            // ABOUT SECTION
+            Text("About", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            NeumorphicCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 16.dp,
+                innerPadding = 24.dp
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        Icons.Default.VerifiedUser,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = colors.accent
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "KeePassSD (Sender Device)",
+                        color = colors.textPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Version 1.0.0-beta",
+                        color = colors.textSecondary,
+                        fontSize = 14.sp
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Designed & Developed by",
+                        color = colors.textSecondary,
+                        fontSize = 12.sp
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Flakeforever",
+                            color = colors.textPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Default.Favorite,
+                            contentDescription = "with",
+                            tint = colors.accent,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "AI",
+                            color = colors.textPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
     }
 }

@@ -47,6 +47,12 @@ class MainViewModel : ViewModel() {
     private val _unlockState = MutableStateFlow<UnlockState>(UnlockState.Idle)
     val unlockState: StateFlow<UnlockState> = _unlockState
 
+    private val _showSettings = MutableStateFlow(false)
+    val showSettings: StateFlow<Boolean> = _showSettings
+
+    private val _diagnosticResult = MutableStateFlow<String>("")
+    val diagnosticResult: StateFlow<String> = _diagnosticResult
+
     var database: KeePassDatabase? = null
 
     private val _vaultGroups = MutableStateFlow<List<VaultGroup>>(emptyList())
@@ -60,6 +66,17 @@ class MainViewModel : ViewModel() {
 
     fun setUnlockError(msg: String) {
         _unlockState.value = UnlockState.Error(msg)
+    }
+
+    fun toggleSettings(show: Boolean) {
+        _showSettings.value = show
+        if (!show) {
+            _diagnosticResult.value = ""
+        }
+    }
+
+    fun setDiagnosticResult(result: String) {
+        _diagnosticResult.value = result
     }
 
     fun requestYubiKeyChallenge(context: Context, uri: Uri, onResult: (ByteArray?) -> Unit) {
