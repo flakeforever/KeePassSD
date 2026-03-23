@@ -5,9 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,7 +24,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 
 fun Modifier.neumorphic(
@@ -159,6 +163,8 @@ fun NeumorphicCard(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 16.dp,
     innerPadding: Dp = 16.dp,
+    isPressed: Boolean = false,
+    backgroundColor: Color = LocalNeumorphicColors.current.background,
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
 ) {
     val colors = LocalNeumorphicColors.current
@@ -166,15 +172,53 @@ fun NeumorphicCard(
     Box(
         modifier = modifier
             .neumorphic(
-                backgroundColor = colors.background,
+                backgroundColor = backgroundColor,
                 lightShadowColor = colors.lightShadow,
                 darkShadowColor = colors.darkShadow,
                 cornerRadius = cornerRadius,
-                isPressed = false
+                isPressed = isPressed
             )
             .padding(innerPadding),
         contentAlignment = Alignment.Center
     ) {
         content()
+    }
+}
+
+@Composable
+fun EngravedText(
+    text: String,
+    modifier: Modifier = Modifier,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontWeight: FontWeight? = null,
+    textColor: Color? = null
+) {
+    val colors = LocalNeumorphicColors.current
+    val fill = textColor ?: colors.textPrimary // keep the original dark gray
+
+    Box(modifier = modifier) {
+        // Bottom-Right Highlight (pokes out from the bottom-right edge)
+        Text(
+            text = text,
+            color = colors.lightShadow.copy(alpha = 0.9f),
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            modifier = Modifier.offset(x = 1.5.dp, y = 1.5.dp)
+        )
+        // Top-Left Shadow (pokes out from the top-left edge)
+        Text(
+            text = text,
+            color = colors.darkShadow.copy(alpha = 0.9f),
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            modifier = Modifier.offset(x = (-1).dp, y = (-1).dp)
+        )
+        // Main Body (The floor of the engraving)
+        Text(
+            text = text,
+            color = fill,
+            fontSize = fontSize,
+            fontWeight = fontWeight
+        )
     }
 }
