@@ -666,6 +666,19 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
         }
     }
 
+    val hwKeyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val responseBytes = result.data?.getByteArrayExtra("response")
+            if (responseBytes != null && databaseUri != null) {
+                viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null, responseBytes)
+            } else {
+                viewModel.setUnlockError("Hardware Key failed to return a valid response signature.")
+            }
+        } else {
+            viewModel.setUnlockError("Hardware Key unlock cancelled.")
+        }
+    }
+
     // Display Error Toasts
     LaunchedEffect(unlockState) {
         if (unlockState is UnlockState.Error) {
@@ -764,7 +777,7 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
             Spacer(modifier = Modifier.height(16.dp))
 
             // Hardware Key Row
-            val hwOptions = listOf("None", "YubiKey 5C Nano", "YubiKey 5 NFC")
+            val hwOptions = listOf("None", "YubiKey Challenge-Response")
             DropdownRow(
                 label = "Hardware key",
                 options = hwOptions,
@@ -798,7 +811,28 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                     icon = Icons.Default.LockOpen,
                     onClick = { 
                         if (dbSelected && unlockState !is UnlockState.Loading) {
-                            viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null)
+                            if (useHwKey && hwKey == "YubiKey Challenge-Response") {
+                                viewModel.requestYubiKeyChallenge(context, databaseUri!!) { challengeBytes ->
+                                    if (challengeBytes != null) {
+                                        val intent = android.content.Intent("android.yubikey.intent.action.CHALLENGE_RESPONSE")
+                                        intent.putExtra("challenge", challengeBytes)
+                                        intent.putExtra("purpose", "KeePassSD")
+                                        
+                                        try {
+                                            hwKeyLauncher.launch(intent)
+                                        } catch (e: android.content.ActivityNotFoundException) {
+                                            try {
+                                                intent.action = "net.pp3345.ykdroid.intent.action.CHALLENGE_RESPONSE"
+                                                hwKeyLauncher.launch(intent)
+                                            } catch (e2: android.content.ActivityNotFoundException) {
+                                                viewModel.setUnlockError("No Hardware Key Driver installed. Please install KeePassDX Key Driver or ykDroid.")
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null)
+                            }
                         } 
                     },
                     modifier = Modifier.padding(bottom = 8.dp).size(64.dp),
