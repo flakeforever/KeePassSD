@@ -3,6 +3,7 @@ package com.channingchen.keepasssd
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -12,9 +13,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -22,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -30,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.channingchen.keepasssd.ui.theme.*
 
 class MainActivity : ComponentActivity() {
@@ -38,12 +46,30 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             KeePassSDTheme {
+                val viewModel: MainViewModel = viewModel()
+                val unlockState by viewModel.unlockState.collectAsState()
+                
                 var currentScreen by remember { mutableStateOf("Unlock") }
 
+                LaunchedEffect(unlockState) {
+                    if (unlockState is UnlockState.Success) {
+                        currentScreen = "Main"
+                    }
+                }
+
                 if (currentScreen == "Main") {
-                    MainScreen(onNavigateToUnlock = { currentScreen = "Unlock" })
+                    MainScreen(
+                        viewModel = viewModel,
+                        onNavigateToUnlock = { 
+                            viewModel.resetState()
+                            currentScreen = "Unlock" 
+                        }
+                    )
                 } else {
-                    UnlockScreen(onNavigateToMain = { currentScreen = "Main" })
+                    UnlockScreen(
+                        viewModel = viewModel,
+                        unlockState = unlockState
+                    )
                 }
             }
         }
@@ -65,24 +91,55 @@ fun extractFileName(context: Context, uri: Uri): String {
     return name
 }
 
-data class MockItem(
-    val title: String,
-    val username: String,
-    val url: String,
-    val pass: String
-)
-
-val mockItems = listOf(
-    MockItem("Gmail", "chadchen868@gmail.com", "https://mail.google.com", "password123"),
-    MockItem("Gmail", "flake.chen@gmail.com", "https://mail.google.com", "password456")
-)
-
 @Composable
-fun MainScreen(onNavigateToUnlock: () -> Unit = {}) {
+fun KeePassIcon(standardIconId: Int, customIconData: ByteArray?, tint: Color, modifier: Modifier) {
+    var customBitmap: androidx.compose.ui.graphics.ImageBitmap? = null
+    
+    if (customIconData != null && customIconData.isNotEmpty()) {
+        try {
+            val bitmap = BitmapFactory.decodeByteArray(customIconData, 0, customIconData.size)
+            if (bitmap != null) {
+                customBitmap = bitmap.asImageBitmap()
+            }
+        } catch (e: Exception) {}
+    }
+    
+    if (customBitmap != null) {
+        Image(
+            bitmap = customBitmap,
+            contentDescription = null,
+            modifier = modifier
+        )
+    } else {
+        val iconVec = when(standardIconId) {
+            0 -> Icons.Default.VpnKey     // Key (Password)
+            1 -> Icons.Default.Public     // World (Browser)
+            2 -> Icons.Default.Warning    // Warning
+            3 -> Icons.Default.Dns        // Network Server
+            19 -> Icons.Default.Email     // Email
+            48 -> Icons.Default.Folder    // Folder
+            61 -> Icons.Default.Person    // Person
+            else -> Icons.Default.Lock    // Fallback
+        }
+        Icon(iconVec, null, tint = tint, modifier = modifier)
+    }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
     val colors = LocalNeumorphicColors.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    
     var searchQuery by remember { mutableStateOf("") }
-    var selectedItem by remember { mutableStateOf<MockItem?>(null) }
-    var showListMenu by remember { mutableStateOf(false) }
+    var selectedItem by remember { mutableStateOf<VaultItem?>(null) }
+    
+    var showBottomSheet by remember { mutableStateOf(false) }
+    var currentViewedGroup by remember { mutableStateOf<VaultGroup?>(null) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    val vaultGroups by viewModel.vaultGroups.collectAsState()
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -92,6 +149,12 @@ fun MainScreen(onNavigateToUnlock: () -> Unit = {}) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        focusManager.clearFocus()
+                        searchQuery = ""
+                    })
+                }
                 .padding(horizontal = 24.dp)
         ) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -130,26 +193,92 @@ fun MainScreen(onNavigateToUnlock: () -> Unit = {}) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NeumorphicCard(
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    cornerRadius = 28.dp,
-                    innerPadding = 0.dp
-                ) {
-                    TextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search...", color = colors.textSecondary) },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            cursorColor = colors.accent,
-                            focusedTextColor = colors.textPrimary,
-                            unfocusedTextColor = colors.textPrimary
-                        ),
-                        modifier = Modifier.fillMaxSize()
-                    )
+                Box(modifier = Modifier.weight(1f)) {
+                    NeumorphicCard(
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        cornerRadius = 28.dp,
+                        innerPadding = 0.dp
+                    ) {
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search title/user...", color = colors.textSecondary) },
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                cursorColor = colors.accent,
+                                focusedTextColor = colors.textPrimary,
+                                unfocusedTextColor = colors.textPrimary
+                            ),
+                            modifier = Modifier.fillMaxSize(),
+                            singleLine = true
+                        )
+                    }
+
+                    // Global Independent Search Overlay
+                    if (searchQuery.isNotEmpty()) {
+                        val allItems = vaultGroups.flatMap { it.items }
+                        val searchResults = allItems.filter {
+                            it.title.contains(searchQuery, true) || it.username.contains(searchQuery, true)
+                        }.take(15)
+
+                        val yOffset = with(androidx.compose.ui.platform.LocalDensity.current) { 64.dp.roundToPx() }
+
+                        androidx.compose.ui.window.Popup(
+                            alignment = Alignment.TopStart,
+                            offset = androidx.compose.ui.unit.IntOffset(0, yOffset),
+                            properties = androidx.compose.ui.window.PopupProperties(focusable = false) // Preserves keyboard focus!
+                        ) {
+                            Box {
+                                NeumorphicCard(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.85f)
+                                        .heightIn(max = 280.dp),
+                                    cornerRadius = 16.dp,
+                                    innerPadding = 8.dp
+                                ) {
+                                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                        if (searchResults.isEmpty()) {
+                                            item {
+                                                Text("No matching entries found", color = colors.textSecondary, modifier = Modifier.padding(16.dp))
+                                            }
+                                        } else {
+                                            items(searchResults) { item ->
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            selectedItem = item
+                                                            searchQuery = ""
+                                                            focusManager.clearFocus()
+                                                        }
+                                                        .padding(vertical = 12.dp, horizontal = 16.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    KeePassIcon(
+                                                        standardIconId = item.standardIconId,
+                                                        customIconData = item.customIconData,
+                                                        tint = colors.textSecondary,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                    Spacer(Modifier.width(16.dp))
+                                                    Column {
+                                                        Text(if (item.title.isEmpty()) "Untitled" else item.title, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                                                        if (item.username.isNotEmpty()) {
+                                                            Text(item.username, color = colors.textSecondary, fontSize = 12.sp)
+                                                        }
+                                                    }
+                                                }
+                                                Divider(color = colors.darkShadow.copy(alpha=0.15f), modifier = Modifier.padding(horizontal = 16.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 Spacer(modifier = Modifier.width(16.dp))
@@ -157,38 +286,12 @@ fun MainScreen(onNavigateToUnlock: () -> Unit = {}) {
                 Box {
                     NeumorphicIconButton(
                         icon = Icons.Default.List,
-                        onClick = { showListMenu = true }
-                    )
-                    
-                    DropdownMenu(
-                        expanded = showListMenu,
-                        onDismissRequest = { showListMenu = false },
-                        modifier = Modifier.background(colors.background)
-                    ) {
-                        Text(
-                            text = "E-mail", 
-                            fontWeight = FontWeight.Bold, 
-                            color = colors.textSecondary,
-                            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
-                        )
-                        mockItems.forEach { item ->
-                            DropdownMenuItem(
-                                text = { 
-                                    Column {
-                                        Text(item.title, color = colors.textPrimary)
-                                        Text(item.username, color = colors.textSecondary, fontSize = 12.sp)
-                                    }
-                                },
-                                leadingIcon = { 
-                                    Icon(Icons.Default.Email, null, tint = colors.textSecondary) 
-                                },
-                                onClick = { 
-                                    selectedItem = item
-                                    showListMenu = false 
-                                }
-                            )
+                        onClick = { 
+                            searchQuery = ""
+                            focusManager.clearFocus()
+                            showBottomSheet = true 
                         }
-                    }
+                    )
                 }
             }
             
@@ -198,29 +301,40 @@ fun MainScreen(onNavigateToUnlock: () -> Unit = {}) {
             NeumorphicCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(152.dp), // Fixed height to make empty/selected size exactly the same!
+                    .height(152.dp),
                 cornerRadius = 24.dp
             ) {
                 if (selectedItem != null) {
                     val item = selectedItem!!
                     Column(
-                        modifier = Modifier
-                            .fillMaxSize(),
+                        modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Email, null, tint = colors.accent, modifier = Modifier.size(40.dp))
+                            KeePassIcon(
+                                standardIconId = item.standardIconId,
+                                customIconData = item.customIconData,
+                                tint = colors.accent,
+                                modifier = Modifier.size(40.dp)
+                            )
                             Spacer(Modifier.width(16.dp))
                             Column {
-                                Text(item.title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
-                                Text(item.url, fontSize = 14.sp, color = colors.accent)
+                                Text(
+                                    text = if (item.title.isEmpty()) "Untitled" else item.title, 
+                                    fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = if (item.url.isEmpty()) item.groupName else item.url, 
+                                    fontSize = 14.sp, color = colors.accent,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                         
                         Spacer(Modifier.height(24.dp))
                         
-                        // Recessed Inverted Field
-                        ReadOnlyField(value = item.username)
+                        ReadOnlyField(value = if(item.username.isEmpty()) "(No Username)" else item.username)
                     }
                 } else {
                     Column(
@@ -229,14 +343,14 @@ fun MainScreen(onNavigateToUnlock: () -> Unit = {}) {
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Lock,
+                            imageVector = Icons.Default.Search,
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
                             tint = colors.textSecondary.copy(alpha = 0.5f)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "No item selected",
+                            text = "Search or select an entry",
                             color = colors.textSecondary,
                             fontSize = 18.sp
                         )
@@ -246,9 +360,9 @@ fun MainScreen(onNavigateToUnlock: () -> Unit = {}) {
             
             Spacer(modifier = Modifier.weight(1f))
             
-            // Bottom Instruction Text (Elevated right above the Action Buttons)
+            // Bottom Instruction Text
             Text(
-                text = "Press below to send",
+                text = "Press below to send via HID",
                 color = colors.textSecondary,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
@@ -258,9 +372,154 @@ fun MainScreen(onNavigateToUnlock: () -> Unit = {}) {
             Spacer(modifier = Modifier.height(16.dp))
             
             // Action Buttons
-            ActionButtons()
+            ActionButtons(selectedItem = selectedItem)
             
             Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        // Bottom Sheet Drawer for Hierarchical Selection (Filters removed, Independent)
+        if (showBottomSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { 
+                    showBottomSheet = false
+                    currentViewedGroup = null
+                },
+                sheetState = sheetState,
+                containerColor = colors.background, // Match Neumorphism base color
+                dragHandle = { BottomSheetDefaults.DragHandle() }
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {
+                    // Drawer Top Navigation Bar
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (currentViewedGroup != null) {
+                            IconButton(onClick = { currentViewedGroup = null }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = colors.textPrimary)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = currentViewedGroup!!.name,
+                                color = colors.textPrimary,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else {
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                text = "Groups",
+                                color = colors.textPrimary,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Divider(color = colors.darkShadow.copy(alpha = 0.3f))
+
+                    // Drawer Scrollable Content
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        if (currentViewedGroup == null) {
+                            // SHOW GROUPS LIST
+                            if (vaultGroups.isEmpty()) {
+                                item {
+                                    Text(
+                                        "No groups found",
+                                        color = colors.textSecondary,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                }
+                            } else {
+                                items(vaultGroups) { group ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { currentViewedGroup = group }
+                                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            KeePassIcon(
+                                                standardIconId = group.standardIconId,
+                                                customIconData = group.customIconData,
+                                                tint = colors.textPrimary,
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                            Spacer(Modifier.width(16.dp))
+                                            Text(
+                                                text = group.name,
+                                                color = colors.textPrimary,
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                        Icon(Icons.Default.KeyboardArrowRight, null, tint = colors.textSecondary)
+                                    }
+                                    Divider(color = colors.darkShadow.copy(alpha=0.15f), modifier = Modifier.padding(horizontal = 16.dp))
+                                }
+                            }
+                        } else {
+                            // SHOW ITEMS IN SELECTED GROUP (No Search Filter)
+                            val groupItems = currentViewedGroup!!.items
+
+                            if (groupItems.isEmpty()) {
+                                item {
+                                    Text(
+                                        "Empty group",
+                                        color = colors.textSecondary,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
+                                }
+                            } else {
+                                items(groupItems) { item ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { 
+                                                selectedItem = item
+                                                showBottomSheet = false // closes drawer
+                                                focusManager.clearFocus()
+                                            }
+                                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        KeePassIcon(
+                                            standardIconId = item.standardIconId,
+                                            customIconData = item.customIconData,
+                                            tint = colors.textSecondary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        Spacer(Modifier.width(16.dp))
+                                        Column {
+                                            Text(
+                                                text = if (item.title.isEmpty()) "Untitled" else item.title,
+                                                color = colors.textPrimary,
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            if (item.username.isNotEmpty()) {
+                                                Text(
+                                                    text = item.username,
+                                                    color = colors.textSecondary,
+                                                    fontSize = 14.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Divider(color = colors.darkShadow.copy(alpha=0.15f), modifier = Modifier.padding(horizontal = 16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -297,9 +556,13 @@ fun ReadOnlyField(value: String) {
 }
 
 @Composable
-fun ActionButtons() {
+fun ActionButtons(selectedItem: VaultItem?) {
     val colors = LocalNeumorphicColors.current
     
+    val userEnabled = selectedItem != null && selectedItem.username.isNotEmpty()
+    val passEnabled = selectedItem != null && selectedItem.pass.isNotEmpty()
+    val tabEnterEnabled = selectedItem != null
+
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -307,6 +570,7 @@ fun ActionButtons() {
         ) {
             NeumorphicButton(
                 onClick = { /* TODO */ },
+                enabled = userEnabled,
                 modifier = Modifier.weight(1.5f).height(48.dp),
                 innerPadding = 0.dp
             ) {
@@ -315,6 +579,7 @@ fun ActionButtons() {
             Spacer(modifier = Modifier.width(16.dp))
             NeumorphicButton(
                 onClick = { /* TODO */ },
+                enabled = passEnabled,
                 modifier = Modifier.weight(1.5f).height(48.dp),
                 innerPadding = 0.dp
             ) {
@@ -330,6 +595,7 @@ fun ActionButtons() {
         ) {
             NeumorphicButton(
                 onClick = { /* TODO */ },
+                enabled = tabEnterEnabled,
                 modifier = Modifier.weight(1f).height(64.dp),
                 innerPadding = 0.dp
             ) {
@@ -344,6 +610,7 @@ fun ActionButtons() {
             
             NeumorphicButton(
                 onClick = { /* TODO */ },
+                enabled = tabEnterEnabled,
                 modifier = Modifier.weight(1f).height(64.dp),
                 innerPadding = 0.dp
             ) {
@@ -358,17 +625,20 @@ fun ActionButtons() {
 }
 
 @Composable
-fun UnlockScreen(onNavigateToMain: () -> Unit = {}) {
+fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
     val colors = LocalNeumorphicColors.current
     val context = LocalContext.current
 
     var databaseFile by remember { mutableStateOf("") }
+    var databaseUri by remember { mutableStateOf<Uri?>(null) }
+    
     val dbLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val name = extractFileName(context, uri)
             // Limit to .kdbx extension
             if (name.endsWith(".kdbx", ignoreCase = true)) {
                 databaseFile = name
+                databaseUri = uri
             } else {
                 Toast.makeText(context, "Please select a .kdbx file", Toast.LENGTH_SHORT).show()
             }
@@ -380,6 +650,7 @@ fun UnlockScreen(onNavigateToMain: () -> Unit = {}) {
     var passwordVisible by remember { mutableStateOf(false) }
 
     var keyfile by remember { mutableStateOf("") }
+    var keyfileUri by remember { mutableStateOf<Uri?>(null) }
     var useKeyfile by remember { mutableStateOf(false) }
     var keyfileVisible by remember { mutableStateOf(false) }
 
@@ -390,7 +661,16 @@ fun UnlockScreen(onNavigateToMain: () -> Unit = {}) {
         if (uri != null) {
             val name = extractFileName(context, uri)
             keyfile = name
+            keyfileUri = uri
             useKeyfile = name.isNotEmpty()
+        }
+    }
+
+    // Display Error Toasts
+    LaunchedEffect(unlockState) {
+        if (unlockState is UnlockState.Error) {
+            Toast.makeText(context, unlockState.message, Toast.LENGTH_LONG).show()
+            viewModel.resetState()
         }
     }
 
@@ -503,12 +783,24 @@ fun UnlockScreen(onNavigateToMain: () -> Unit = {}) {
             // Unlock Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                val dbSelected = databaseFile.isNotEmpty()
+                if (unlockState is UnlockState.Loading) {
+                    CircularProgressIndicator(
+                        color = colors.accent,
+                        modifier = Modifier.padding(end = 16.dp)
+                    )
+                }
+                
+                val dbSelected = databaseUri != null
                 NeumorphicIconButton(
                     icon = Icons.Default.LockOpen,
-                    onClick = { if (dbSelected) onNavigateToMain() },
+                    onClick = { 
+                        if (dbSelected && unlockState !is UnlockState.Loading) {
+                            viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null)
+                        } 
+                    },
                     modifier = Modifier.padding(bottom = 8.dp).size(64.dp),
                     iconTint = if (dbSelected) colors.textPrimary else colors.textSecondary.copy(alpha = 0.3f),
                     cornerRadius = 16.dp
@@ -714,8 +1006,6 @@ fun FileSelectRow(
                     }
                 )
                 
-                // Invisible overlay to capture clicks for file picking, 
-                // leaving the right side (where the icon is) free for icon clicks.
                 Box(
                     modifier = Modifier
                         .matchParentSize()
@@ -738,21 +1028,5 @@ fun FileSelectRow(
                 uncheckedBorderColor = colors.darkShadow
             )
         )
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, device = "id:pixel_5")
-@Composable
-fun MainScreenPreview() {
-    KeePassSDTheme {
-        MainScreen()
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, device = "id:pixel_5")
-@Composable
-fun UnlockScreenPreview() {
-    KeePassSDTheme {
-        UnlockScreen()
     }
 }

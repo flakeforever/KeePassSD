@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -100,6 +101,7 @@ fun Modifier.neumorphic(
 fun NeumorphicButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     cornerRadius: Dp = 16.dp,
     innerPadding: Dp = 16.dp,
     content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit
@@ -110,21 +112,25 @@ fun NeumorphicButton(
     val haptic = LocalHapticFeedback.current
 
     LaunchedEffect(isPressed) {
-        if (isPressed) {
+        if (isPressed && enabled) {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         }
     }
 
+    val displayAlpha = if (enabled) 1f else 0.4f
+
     Box(
         modifier = modifier
+            .alpha(displayAlpha)
             .neumorphic(
                 backgroundColor = colors.background,
                 lightShadowColor = colors.lightShadow,
                 darkShadowColor = colors.darkShadow,
                 cornerRadius = cornerRadius,
-                isPressed = isPressed
+                isPressed = if (enabled) isPressed else false
             )
             .clickable(
+                enabled = enabled,
                 interactionSource = interactionSource,
                 indication = null, // No default ripple
                 onClick = onClick
@@ -141,11 +147,13 @@ fun NeumorphicIconButton(
     icon: ImageVector,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     cornerRadius: Dp = 16.dp,
     iconTint: Color = LocalNeumorphicColors.current.textPrimary
 ) {
     NeumorphicButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.size(56.dp),
         cornerRadius = cornerRadius,
         innerPadding = 0.dp
