@@ -563,7 +563,7 @@ fun ActionButtons(selectedItem: VaultItem?) {
     val colors = LocalNeumorphicColors.current
     
     val userEnabled = selectedItem != null && selectedItem.username.isNotEmpty()
-    val passEnabled = selectedItem != null && selectedItem.pass.isNotEmpty()
+    val passEnabled = selectedItem != null && (selectedItem.entry.fields["Password"]?.content?.isNotEmpty() == true)
     val tabEnterEnabled = selectedItem != null
 
     Column {

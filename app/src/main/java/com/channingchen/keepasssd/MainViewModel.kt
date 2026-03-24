@@ -30,7 +30,7 @@ data class VaultItem(
     val title: String,
     val username: String,
     val url: String,
-    val pass: String,
+    val entry: app.keemobile.kotpass.models.Entry,
     val groupName: String,
     val standardIconId: Int,
     val customIconData: ByteArray?
@@ -238,10 +238,9 @@ class MainViewModel : ViewModel() {
         val items = group.entries.map { entry ->
             val title = entry.fields["Title"]?.content ?: "Untitled"
             val username = entry.fields["UserName"]?.content ?: ""
-            val password = entry.fields["Password"]?.content ?: ""
             val url = entry.fields["URL"]?.content ?: ""
             val itemCustomIcon = entry.customIconUuid?.let { customIcons[it]?.data }
-            VaultItem(title, username, url, password, currentGroupName, entry.icon.ordinal, itemCustomIcon)
+            VaultItem(title, username, url, entry, currentGroupName, entry.icon.ordinal, itemCustomIcon)
         }
         
         if (items.isNotEmpty()) {
