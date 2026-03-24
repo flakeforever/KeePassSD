@@ -7,10 +7,15 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.keemobile.kotpass.database.Credentials
 import app.keemobile.kotpass.cryptography.EncryptedValue
+import app.keemobile.kotpass.cryptography.format.KdfProvider
 import app.keemobile.kotpass.database.KeePassDatabase
 import app.keemobile.kotpass.database.decode
 import app.keemobile.kotpass.database.header.DatabaseHeader
+import app.keemobile.kotpass.database.header.KdfParameters
 import app.keemobile.kotpass.models.Group
+import org.signal.argon2.Argon2
+import org.signal.argon2.Type
+import org.signal.argon2.Version
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -274,7 +279,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         ?: throw Exception("Cannot open database file")
                     
                     val bytes = stream.use { it.readBytes() }
-                    database = KeePassDatabase.decode(java.io.ByteArrayInputStream(bytes), credentials)
+                    database = KeePassDatabase.decode(
+                        java.io.ByteArrayInputStream(bytes), 
+                        credentials,
+                        kdfProvider = NativeKdfProvider()
+                    )
                     
                     val rootGroup = database!!.content.group
                     val dbName = extractFileName(context, dbUri)
@@ -313,5 +322,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             result.addAll(extractGroups(subgroup, currentGroupName, customIcons))
         }
         return result
+    }
+}
+
+class NativeKdfProvider : KdfProvider {
+    override fun transformKey(kdfParameters: KdfParameters, compositeKey: ByteArray): ByteArray {
+        return when (kdfParameters) {
+            is KdfParameters.Argon2 -> {
+                try {
+                    val version = if (kdfParameters.version == 19u) Version.V13 else Version.V10
+                    val type = when (kdfParameters.variant) {
+                        KdfParameters.Argon2.Variant.Argon2d -> Type.Argon2d
+                        KdfParameters.Argon2.Variant.Argon2id -> Type.Argon2id
+                    }
+
+                    val builder = Argon2.Builder(version)
+                        .type(type)
+                        .iterations(kdfParameters.iterations.toInt())
+                        .memoryCostKiB((kdfParameters.memory / 1024uL).toInt())
+                        .parallelism(kdfParameters.parallelism.toInt())
+                        .hashLength(32)
+
+                    val argon2 = builder.build()
+                    val result = argon2.hash(compositeKey, kdfParameters.salt.toByteArray())
+                    result.hash
+                } catch (e: Throwable) {
+                    throw Exception(e.message ?: "Argon2 Native Failure", e)
+                }
+            }
+            is KdfParameters.Aes -> {
+                transformAesKey(compositeKey, kdfParameters.seed.toByteArray(), kdfParameters.rounds)
+            }
+        }
+    }
+
+    private fun transformAesKey(key: ByteArray, seed: ByteArray, rounds: ULong): ByteArray {
+        val bytes = key.copyOf()
+        try {
+            val cipher = javax.crypto.Cipher.getInstance("AES/ECB/NoPadding")
+            val keySpec = javax.crypto.spec.SecretKeySpec(seed, "AES")
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec)
+
+            repeat(rounds.toInt()) {
+                cipher.update(bytes, 0, 16, bytes, 0)
+                cipher.update(bytes, 16, 16, bytes, 16)
+            }
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            return digest.digest(bytes)
+        } finally {
+            bytes.fill(0)
+        }
     }
 }

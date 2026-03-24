@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation("androidx.compose.material:material-icons-extended")
     implementation("app.keemobile:kotpass:0.13.0")
+    implementation("org.signal:argon2:13.1")
     implementation("com.squareup.okio:okio:3.9.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
