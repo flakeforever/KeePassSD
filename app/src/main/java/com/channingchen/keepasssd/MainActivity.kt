@@ -51,9 +51,12 @@ class MainActivity : ComponentActivity() {
                 val showSettings by viewModel.showSettings.collectAsState()
                 
                 var currentScreen by remember { mutableStateOf("Unlock") }
+                val context = LocalContext.current
 
                 LaunchedEffect(unlockState) {
-                    if (unlockState is UnlockState.Success) {
+                    val state = unlockState
+                    if (state is UnlockState.Success) {
+                        Toast.makeText(context, "Unlocked: ${state.databaseName}", Toast.LENGTH_SHORT).show()
                         currentScreen = "Main"
                     }
                 }
@@ -638,10 +641,12 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
     val dbLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val name = extractFileName(context, uri)
-            // Limit to .kdbx extension
             if (name.endsWith(".kdbx", ignoreCase = true)) {
                 databaseFile = name
                 databaseUri = uri
+                try {
+                    context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (e: Exception) {}
             } else {
                 Toast.makeText(context, "Please select a .kdbx file", Toast.LENGTH_SHORT).show()
             }
@@ -660,12 +665,44 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
     var hwKey by remember { mutableStateOf("None") }
     var useHwKey by remember { mutableStateOf(false) }
 
+    val rememberLastFile by viewModel.rememberLastFile.collectAsState()
+    val savedUriStr by viewModel.databaseUriStr.collectAsState()
+    val savedKeyfileUriStr by viewModel.keyfileUriStr.collectAsState()
+    val prefUseKeyfile by viewModel.useKeyfilePref.collectAsState()
+    val prefUseHwKey by viewModel.useHwKeyPref.collectAsState()
+    val prefHwKeyOption by viewModel.hwKeyOption.collectAsState()
+
+    LaunchedEffect(Unit) {
+        if (rememberLastFile) {
+            if (savedUriStr.isNotEmpty()) {
+                try {
+                    val savedUri = Uri.parse(savedUriStr)
+                    databaseUri = savedUri
+                    databaseFile = extractFileName(context, savedUri)
+                } catch (e: Exception) {}
+            }
+            if (savedKeyfileUriStr.isNotEmpty()) {
+                try {
+                    val savedUri = Uri.parse(savedKeyfileUriStr)
+                    keyfileUri = savedUri
+                    keyfile = extractFileName(context, savedUri)
+                } catch (e: Exception) {}
+            }
+            useKeyfile = prefUseKeyfile
+            useHwKey = prefUseHwKey
+            hwKey = prefHwKeyOption
+        }
+    }
+
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val name = extractFileName(context, uri)
             keyfile = name
             keyfileUri = uri
             useKeyfile = name.isNotEmpty()
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) {}
         }
     }
 
@@ -673,7 +710,7 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val responseBytes = result.data?.getByteArrayExtra("response")
             if (responseBytes != null && databaseUri != null) {
-                viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null, responseBytes)
+                viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null, responseBytes, useKeyfile, hwKey, useHwKey)
             } else {
                 viewModel.setUnlockError("Hardware Key failed to return a valid response signature.")
             }
@@ -834,7 +871,7 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                                     }
                                 }
                             } else {
-                                viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null)
+                                viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null, null, useKeyfile, hwKey, useHwKey)
                             }
                         } 
                     },
@@ -1077,7 +1114,8 @@ fun SettingsScreen(viewModel: MainViewModel) {
             val responseBytes = result.data?.getByteArrayExtra("response")
             if (responseBytes != null) {
                 val hexStr = responseBytes.joinToString("") { "%02x".format(it) }
-                viewModel.setDiagnosticResult("Success! HMAC-SHA1 Response:\n$hexStr")
+                val maskedHex = if (hexStr.length > 10) hexStr.take(6) + "..." + hexStr.takeLast(4) else hexStr
+                viewModel.setDiagnosticResult("Success! HMAC-SHA1 Response:\n$maskedHex")
             } else {
                 viewModel.setDiagnosticResult("Failed: Null response signature.")
             }
@@ -1115,6 +1153,25 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
             
             Spacer(modifier = Modifier.height(32.dp))
+
+            val rememberLastFile by viewModel.rememberLastFile.collectAsState()
+            Row(
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Remember last opened file", color = colors.textPrimary, fontSize = 16.sp)
+                Switch(
+                    checked = rememberLastFile,
+                    onCheckedChange = { viewModel.toggleRememberLastFile(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = colors.accent,
+                        checkedTrackColor = colors.accent.copy(alpha = 0.3f)
+                    )
+                )
+            }
+            Divider(color = colors.darkShadow.copy(alpha = 0.15f))
+            Spacer(Modifier.height(24.dp))
             
             // DIAGNOSTICS SECTION
             Text("Hardware Diagnostics", color = colors.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -1123,7 +1180,8 @@ fun SettingsScreen(viewModel: MainViewModel) {
             NeumorphicCard(
                 modifier = Modifier.fillMaxWidth(),
                 cornerRadius = 16.dp,
-                innerPadding = 16.dp
+                innerPadding = 16.dp,
+                isPressed = true
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
@@ -1166,12 +1224,12 @@ fun SettingsScreen(viewModel: MainViewModel) {
                             modifier = Modifier.fillMaxWidth(),
                             cornerRadius = 8.dp,
                             innerPadding = 12.dp,
-                            isPressed = true,
-                            backgroundColor = colors.background.copy(alpha = 0.5f)
+                            isPressed = false,
+                            backgroundColor = colors.background
                         ) {
                             Text(
                                 diagnosticResult,
-                                color = if (diagnosticResult.startsWith("Success")) Color(0xFF4CAF50) else colors.textSecondary,
+                                color = if (diagnosticResult.startsWith("Success")) Color(0xFF4CAF50) else colors.textPrimary,
                                 fontSize = 13.sp,
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                             )

@@ -1,8 +1,9 @@
 package com.channingchen.keepasssd
 
+import android.app.Application
 import android.content.Context
 import android.net.Uri
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.keemobile.kotpass.database.Credentials
 import app.keemobile.kotpass.cryptography.EncryptedValue
@@ -43,7 +44,7 @@ data class VaultGroup(
     val customIconData: ByteArray?
 )
 
-class MainViewModel : ViewModel() {
+class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _unlockState = MutableStateFlow<UnlockState>(UnlockState.Idle)
     val unlockState: StateFlow<UnlockState> = _unlockState
 
@@ -57,6 +58,62 @@ class MainViewModel : ViewModel() {
 
     private val _vaultGroups = MutableStateFlow<List<VaultGroup>>(emptyList())
     val vaultGroups: StateFlow<List<VaultGroup>> = _vaultGroups
+
+    private val prefs = application.getSharedPreferences("keepasssd_prefs", Context.MODE_PRIVATE)
+
+    private val _rememberLastFile = MutableStateFlow(prefs.getBoolean("remember_last_file", true))
+    val rememberLastFile: StateFlow<Boolean> = _rememberLastFile
+
+    private val _databaseUriStr = MutableStateFlow(prefs.getString("last_database_uri", "") ?: "")
+    val databaseUriStr: StateFlow<String> = _databaseUriStr
+
+    private val _keyfileUriStr = MutableStateFlow(prefs.getString("last_keyfile_uri", "") ?: "")
+    val keyfileUriStr: StateFlow<String> = _keyfileUriStr
+
+    private val _useKeyfile = MutableStateFlow(prefs.getBoolean("use_keyfile", false))
+    val useKeyfilePref: StateFlow<Boolean> = _useKeyfile
+
+    private val _useHwKey = MutableStateFlow(prefs.getBoolean("use_hw_key", false))
+    val useHwKeyPref: StateFlow<Boolean> = _useHwKey
+
+    private val _hwKeyOption = MutableStateFlow(prefs.getString("hw_key_option", "None") ?: "None")
+    val hwKeyOption: StateFlow<String> = _hwKeyOption
+
+    fun toggleRememberLastFile(enabled: Boolean) {
+        _rememberLastFile.value = enabled
+        prefs.edit().putBoolean("remember_last_file", enabled).apply()
+        if (!enabled) {
+            prefs.edit()
+                .putString("last_database_uri", "")
+                .putString("last_keyfile_uri", "")
+                .putBoolean("use_keyfile", false)
+                .putBoolean("use_hw_key", false)
+                .putString("hw_key_option", "None")
+                .apply()
+            _databaseUriStr.value = ""
+            _keyfileUriStr.value = ""
+            _useKeyfile.value = false
+            _useHwKey.value = false
+            _hwKeyOption.value = "None"
+        }
+    }
+
+    fun saveUnlockConfig(dbUri: Uri, keyfileUri: Uri?, useKeyfile: Boolean, hwKey: String, useHwKey: Boolean) {
+        if (_rememberLastFile.value) {
+            prefs.edit()
+                .putString("last_database_uri", dbUri.toString())
+                .putString("last_keyfile_uri", keyfileUri?.toString() ?: "")
+                .putBoolean("use_keyfile", useKeyfile)
+                .putBoolean("use_hw_key", useHwKey)
+                .putString("hw_key_option", hwKey)
+                .apply()
+            _databaseUriStr.value = dbUri.toString()
+            _keyfileUriStr.value = keyfileUri?.toString() ?: ""
+            _useKeyfile.value = useKeyfile
+            _useHwKey.value = useHwKey
+            _hwKeyOption.value = hwKey
+        }
+    }
 
     fun resetState() {
         _unlockState.value = UnlockState.Idle
@@ -182,7 +239,10 @@ class MainViewModel : ViewModel() {
         dbUri: Uri, 
         password: String, 
         keyfileUri: Uri?,
-        hwResponse: ByteArray? = null
+        hwResponse: ByteArray? = null,
+        useKeyfile: Boolean = false,
+        hwKey: String = "None",
+        useHwKey: Boolean = false
     ) {
         viewModelScope.launch {
             _unlockState.value = UnlockState.Loading
@@ -213,7 +273,8 @@ class MainViewModel : ViewModel() {
                     val stream = context.contentResolver.openInputStream(dbUri)
                         ?: throw Exception("Cannot open database file")
                     
-                    database = stream.use { KeePassDatabase.decode(it, credentials) }
+                    val bytes = stream.use { it.readBytes() }
+                    database = KeePassDatabase.decode(java.io.ByteArrayInputStream(bytes), credentials)
                     
                     val rootGroup = database!!.content.group
                     val dbName = extractFileName(context, dbUri)
@@ -223,6 +284,7 @@ class MainViewModel : ViewModel() {
 
                 val dbName = extractFileName(context, dbUri)
                 _unlockState.value = UnlockState.Success(dbName)
+                saveUnlockConfig(dbUri, if (useKeyfile) keyfileUri else null, useKeyfile, hwKey, useHwKey)
             } catch (e: Exception) {
                 e.printStackTrace()
                 _unlockState.value = UnlockState.Error(e.message ?: "Failed to unlock database")
