@@ -5,6 +5,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -73,6 +76,25 @@ class MainActivity : ComponentActivity() {
                     if (state is UnlockState.Success) {
                         Toast.makeText(context, "Unlocked: ${state.databaseName}", Toast.LENGTH_SHORT).show()
                         currentScreen = "Main"
+                    } else if (state is UnlockState.Idle) {
+                        currentScreen = "Unlock"
+                    }
+                }
+                
+                // Security: Auto-lock when screen turns off
+                DisposableEffect(context) {
+                    val receiver = object : BroadcastReceiver() {
+                        override fun onReceive(context: Context, intent: Intent) {
+                            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                                viewModel.resetState()
+                            }
+                        }
+                    }
+                    val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+                    context.registerReceiver(receiver, filter)
+                    
+                    onDispose {
+                        context.unregisterReceiver(receiver)
                     }
                 }
 
