@@ -50,6 +50,14 @@ data class VaultGroup(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+    private val bleManager = BleUartManager.getInstance()
+    val isBleConnected = bleManager.isConnected
+    val isBleSending = bleManager.isSending
+    val deviceInfo = bleManager.deviceInfo
+
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo: StateFlow<Boolean> = _canUndo
+
     private val _unlockState = MutableStateFlow<UnlockState>(UnlockState.Idle)
     val unlockState: StateFlow<UnlockState> = _unlockState
 
@@ -124,8 +132,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _unlockState.value = UnlockState.Idle
         database = null
         _vaultGroups.value = emptyList()
+        _canUndo.value = false
     }
-
+    
     fun setUnlockError(msg: String) {
         _unlockState.value = UnlockState.Error(msg)
     }
@@ -301,6 +310,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun connectBle(context: Context) {
+        bleManager.connect(context)
+    }
+
+    fun sendUsername(item: VaultItem) {
+        bleManager.sendString("TXT:${item.username}\n")
+        _canUndo.value = true
+    }
+
+    fun sendPassword(item: VaultItem) {
+        val pass = item.entry.fields["Password"]?.content ?: ""
+        bleManager.sendString("TXT:${pass}\n")
+        _canUndo.value = true
+    }
+
+    fun sendTab() {
+        bleManager.sendString("CMD:TAB\n")
+        _canUndo.value = false // Per user request: TAB does not support UNDO UI activation
+    }
+
+    fun sendEnter() {
+        bleManager.sendString("CMD:ENTER\n")
+        _canUndo.value = false // Per user request: ENTER does not support UNDO UI activation
+    }
+
+    fun sendLock() {
+        bleManager.sendString("CMD:LOCK\n")
+        // Normally lock doesn't trigger UNDO in KPB logic (not mentioned)
+    }
+
+    fun fetchDeviceInfo() {
+        bleManager.sendString("GET:INFO\n")
+    }
+
+    fun sendUndo() {
+        if (_canUndo.value) {
+            bleManager.sendString("CMD:UNDO\n")
+            _canUndo.value = false
+        }
+    }
+
     private fun extractGroups(group: Group, parentName: String, customIcons: Map<UUID, app.keemobile.kotpass.models.CustomIcon>): List<VaultGroup> {
         val result = mutableListOf<VaultGroup>()
         val currentGroupName = group.name.ifEmpty { parentName }
@@ -324,6 +374,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return result
     }
 }
+
 
 class NativeKdfProvider : KdfProvider {
     override fun transformKey(kdfParameters: KdfParameters, compositeKey: ByteArray): ByteArray {

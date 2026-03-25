@@ -14,7 +14,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -23,12 +25,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.animation.core.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -146,6 +161,29 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val vaultGroups by viewModel.vaultGroups.collectAsState()
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.connectBle(context)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+            } else {
+                viewModel.connectBle(context)
+            }
+        } else {
+            viewModel.connectBle(context)
+        }
+    }
+
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -364,12 +402,93 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                 }
             }
             
+            var showInfoDialog by remember { mutableStateOf(false) }
+            val deviceInfo by viewModel.deviceInfo.collectAsState()
+
+            if (showInfoDialog) {
+                DeviceInfoDialog(
+                    info = deviceInfo,
+                    onDismiss = { showInfoDialog = false }
+                )
+            }
+            
             Spacer(modifier = Modifier.weight(1f))
+            
+            val isBleConnected by viewModel.isBleConnected.collectAsState()
+            val isSending by viewModel.isBleSending.collectAsState()
+            
+            // Animation for Pulsing Dot
+            val infiniteTransition = rememberInfiniteTransition(label = "Pulse")
+            val pulseScale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.3f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1200, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "Scale"
+            )
+            val pulseAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.5f,
+                targetValue = 0.8f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1200, easing = LinearOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "Alpha"
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(32.dp)
+                    .clickable(
+                        enabled = isBleConnected && !isSending,
+                        onClick = {
+                            viewModel.fetchDeviceInfo()
+                            showInfoDialog = true
+                        }
+                    ),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (isBleConnected && !isSending) {
+                        // Static Glow
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp * pulseScale)
+                                .background(Color(0xFF4CAF50).copy(alpha = 0.2f), shape = CircleShape)
+                        )
+                    }
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .scale(if (!isBleConnected) pulseScale else 1f)
+                            .alpha(if (!isBleConnected) pulseAlpha else 1f)
+                            .background(
+                                color = if (isBleConnected) Color(0xFF4CAF50) else Color(0xFFF44336),
+                                shape = CircleShape
+                            )
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = if (isBleConnected) "BRIDGE CONNECTED" else "BRIDGE DISCONNECTED",
+                    color = if (isBleConnected) colors.textPrimary else colors.textSecondary.copy(alpha = pulseAlpha),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.5.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
             
             // Bottom Instruction Text
             Text(
                 text = "Press below to send via HID",
-                color = colors.textSecondary,
+                color = if (isBleConnected) colors.textSecondary else colors.textSecondary.copy(alpha = 0.5f),
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
                 fontSize = 14.sp
@@ -378,7 +497,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
             
             // Action Buttons
-            ActionButtons(selectedItem = selectedItem)
+            ActionButtons(viewModel = viewModel, selectedItem = selectedItem)
             
             Spacer(modifier = Modifier.height(24.dp))
         }
@@ -562,12 +681,17 @@ fun ReadOnlyField(value: String) {
 }
 
 @Composable
-fun ActionButtons(selectedItem: VaultItem?) {
+fun ActionButtons(viewModel: MainViewModel, selectedItem: VaultItem?) {
     val colors = LocalNeumorphicColors.current
+    val isSending by viewModel.isBleSending.collectAsState()
+    val isConnected by viewModel.isBleConnected.collectAsState()
+    val canUndo by viewModel.canUndo.collectAsState()
     
-    val userEnabled = selectedItem != null && selectedItem.username.isNotEmpty()
-    val passEnabled = selectedItem != null && (selectedItem.entry.fields["Password"]?.content?.isNotEmpty() == true)
-    val tabEnterEnabled = selectedItem != null
+    val baseEnabled = selectedItem != null && !isSending && isConnected
+    val userEnabled = baseEnabled && selectedItem!!.username.isNotEmpty()
+    val passEnabled = baseEnabled && (selectedItem!!.entry.fields["Password"]?.content?.isNotEmpty() == true)
+    val tabEnterEnabled = baseEnabled
+    val undoEnabled = !isSending && isConnected && canUndo
 
     Column {
         Row(
@@ -575,21 +699,33 @@ fun ActionButtons(selectedItem: VaultItem?) {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             NeumorphicButton(
-                onClick = { /* TODO */ },
+                onClick = { selectedItem?.let { viewModel.sendUsername(it) } },
                 enabled = userEnabled,
                 modifier = Modifier.weight(1.5f).height(48.dp),
                 innerPadding = 0.dp
             ) {
-                Text("Username", color = colors.textPrimary, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isSending) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.accent)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("Username", color = if (isSending) colors.accent else colors.textPrimary, fontWeight = FontWeight.Bold)
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             NeumorphicButton(
-                onClick = { /* TODO */ },
+                onClick = { selectedItem?.let { viewModel.sendPassword(it) } },
                 enabled = passEnabled,
                 modifier = Modifier.weight(1.5f).height(48.dp),
                 innerPadding = 0.dp
             ) {
-                Text("Password", color = colors.textPrimary, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isSending) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.accent)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("Password", color = if (isSending) colors.accent else colors.textPrimary, fontWeight = FontWeight.Bold)
+                }
             }
         }
         
@@ -600,7 +736,7 @@ fun ActionButtons(selectedItem: VaultItem?) {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             NeumorphicButton(
-                onClick = { /* TODO */ },
+                onClick = { viewModel.sendTab() },
                 enabled = tabEnterEnabled,
                 modifier = Modifier.weight(1f).height(64.dp),
                 innerPadding = 0.dp
@@ -612,10 +748,10 @@ fun ActionButtons(selectedItem: VaultItem?) {
                 )
             }
             
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             
             NeumorphicButton(
-                onClick = { /* TODO */ },
+                onClick = { viewModel.sendEnter() },
                 enabled = tabEnterEnabled,
                 modifier = Modifier.weight(1f).height(64.dp),
                 innerPadding = 0.dp
@@ -626,9 +762,28 @@ fun ActionButtons(selectedItem: VaultItem?) {
                     fontWeight = FontWeight.Bold
                 )
             }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            NeumorphicButton(
+                onClick = { viewModel.sendUndo() },
+                enabled = undoEnabled, 
+                modifier = Modifier.weight(1f).height(64.dp),
+                innerPadding = 0.dp
+            ) {
+                Text(
+                    text = "UNDO",
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
+
+/* Original ActionButtons removed */
+private fun ActionButtons_Original_Skip() {}
+
 
 @Composable
 fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
@@ -1287,5 +1442,109 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 }
             }
         }
+    }
+}
+
+@Composable
+fun DeviceInfoDialog(info: String?, onDismiss: () -> Unit) {
+    val colors = LocalNeumorphicColors.current
+    
+    // To avoid dimming, we wrap in a Box that covers the screen in the same stack or use Dialog with transparent properties
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        // Full screen transparent container to cancel default dimming (or as much as possible via properties)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onDismiss, indication = null, interactionSource = remember { MutableInteractionSource() }),
+            contentAlignment = Alignment.Center
+        ) {
+            // THE FLAT MINIMAL CARD
+            Box(
+                modifier = Modifier
+                    .width(320.dp)
+                    .padding(24.dp)
+                    .background(
+                        color = colors.background, // Match overall tone
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
+                    )
+                    .border(
+                        width = 2.dp,
+                        color = colors.darkShadow.copy(alpha = 0.8f),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
+                    )
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "BRIDGE INFO",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = colors.textPrimary,
+                        letterSpacing = 1.sp
+                    )
+                    
+                    Spacer(modifier = Modifier.height(20.dp))
+                    
+                    Divider(color = colors.darkShadow.copy(alpha = 0.15f), thickness = 1.dp)
+                    
+                    Spacer(modifier = Modifier.height(20.dp))
+                    
+                    if (info == null) {
+                        CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(24.dp))
+                    } else {
+                        val parts = info.split("|")
+                        val model = parts.getOrNull(0) ?: "Unknown"
+                        val version = parts.getOrNull(1) ?: "N/A"
+                        val status = parts.getOrNull(2) ?: "GUEST"
+                        
+                        // Vertical layout for Model to support long names
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text("MODEL", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(4.dp))
+                            Text(model, color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        }
+                        
+                        Divider(color = colors.darkShadow.copy(alpha = 0.05f), thickness = 1.dp)
+                        
+                        LightInfoRow("VERSION", "v$version")
+                        LightInfoRow("SAFETY", status)
+                    }
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
+                    
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.textPrimary),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    ) {
+                        Text("CLOSE", color = colors.background, fontWeight = FontWeight.Bold) // Inverted for button
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LightInfoRow(label: String, value: String) {
+    val colors = LocalNeumorphicColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = colors.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
