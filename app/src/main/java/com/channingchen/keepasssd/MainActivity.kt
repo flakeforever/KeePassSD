@@ -29,9 +29,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -812,35 +815,20 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
     val colors = LocalNeumorphicColors.current
     val context = LocalContext.current
 
-    var databaseFile by remember { mutableStateOf("") }
-    var databaseUri by remember { mutableStateOf<Uri?>(null) }
-    
-    val dbLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            val name = extractFileName(context, uri)
-            if (name.endsWith(".kdbx", ignoreCase = true)) {
-                databaseFile = name
-                databaseUri = uri
-                try {
-                    context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                } catch (e: Exception) {}
-            } else {
-                Toast.makeText(context, "Please select a .kdbx file", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
+    var databaseFile by rememberSaveable { mutableStateOf("") }
+    var databaseUri by rememberSaveable { mutableStateOf<Uri?>(null) }
 
-    var password by remember { mutableStateOf("") }
-    var usePassword by remember { mutableStateOf(false) }
-    var passwordVisible by remember { mutableStateOf(false) }
+    var password by rememberSaveable { mutableStateOf("") }
+    var usePassword by rememberSaveable { mutableStateOf(false) }
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
 
-    var keyfile by remember { mutableStateOf("") }
-    var keyfileUri by remember { mutableStateOf<Uri?>(null) }
-    var useKeyfile by remember { mutableStateOf(false) }
-    var keyfileVisible by remember { mutableStateOf(false) }
+    var keyfile by rememberSaveable { mutableStateOf("") }
+    var keyfileUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var useKeyfile by rememberSaveable { mutableStateOf(false) }
+    var keyfileVisible by rememberSaveable { mutableStateOf(false) }
 
-    var hwKey by remember { mutableStateOf("None") }
-    var useHwKey by remember { mutableStateOf(false) }
+    var hwKey by rememberSaveable { mutableStateOf("None") }
+    var useHwKey by rememberSaveable { mutableStateOf(false) }
 
     val rememberLastFile by viewModel.rememberLastFile.collectAsState()
     val savedUriStr by viewModel.databaseUriStr.collectAsState()
@@ -850,7 +838,8 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
     val prefHwKeyOption by viewModel.hwKeyOption.collectAsState()
 
     LaunchedEffect(Unit) {
-        if (rememberLastFile) {
+        // Only load if current local state is empty (prevents overwriting rememberSaveable on recreation)
+        if (databaseUri == null && rememberLastFile) {
             if (savedUriStr.isNotEmpty()) {
                 try {
                     val savedUri = Uri.parse(savedUriStr)
@@ -871,6 +860,21 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
         }
     }
 
+    val dbLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val name = extractFileName(context, uri)
+            if (name.endsWith(".kdbx", ignoreCase = true)) {
+                databaseFile = name
+                databaseUri = uri
+                try {
+                    context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (e: Exception) {}
+            } else {
+                Toast.makeText(context, "Please select a .kdbx file", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val name = extractFileName(context, uri)
@@ -883,16 +887,25 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
         }
     }
 
-    val hwKeyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val responseBytes = result.data?.getByteArrayExtra("response")
-            if (responseBytes != null && databaseUri != null) {
-                viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null, responseBytes, useKeyfile, hwKey, useHwKey)
-            } else {
-                viewModel.setUnlockError("Hardware Key failed to return a valid response signature.")
-            }
-        } else {
-            viewModel.setUnlockError("Hardware Key unlock cancelled.")
+    // Collect hardware key results relayed by KeyDriverProxyActivity via ViewModel SharedFlow
+    LaunchedEffect(Unit) {
+        viewModel.hwKeyResult.collect { result ->
+            result.fold(
+                onSuccess = { responseBytes ->
+                    if (responseBytes != null && databaseUri != null) {
+                        viewModel.unlockDatabase(
+                            context, databaseUri!!, password,
+                            if (useKeyfile) keyfileUri else null,
+                            responseBytes, useKeyfile, hwKey, useHwKey
+                        )
+                    } else {
+                        viewModel.setUnlockError("Hardware Key cancelled or returned no response.")
+                    }
+                },
+                onFailure = { e ->
+                    viewModel.setUnlockError(e.message ?: "Hardware Key error.")
+                }
+            )
         }
     }
 
@@ -908,14 +921,15 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.background
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 24.dp)
-                // Ensures bottom content stays above keyboard
-                .imePadding() 
-        ) {
+                val scrollState = rememberScrollState()
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(horizontal = 24.dp)
+                        .verticalScroll(scrollState)
+                        // Removed imePadding() to prevent double-padding collapse with adjustResize
+                ) {
             Spacer(modifier = Modifier.height(16.dp))
 
             // Header (Database Open button + Settings)
@@ -1007,8 +1021,8 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                 onSwitchChange = { useHwKey = it }
             )
 
-            // Pushes everything below it to the bottom
-            Spacer(modifier = Modifier.weight(1f))
+            // Fixed spacer instead of weight(1f) to work with verticalScroll
+            Spacer(modifier = Modifier.height(32.dp))
 
             // Unlock Button
             Row(
@@ -1031,19 +1045,16 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                             if (useHwKey && hwKey == "YubiKey Challenge-Response") {
                                 viewModel.requestYubiKeyChallenge(context, databaseUri!!) { challengeBytes ->
                                     if (challengeBytes != null) {
-                                        val intent = android.content.Intent("android.yubikey.intent.action.CHALLENGE_RESPONSE")
-                                        intent.putExtra("challenge", challengeBytes)
-                                        intent.putExtra("purpose", "KeePassSD")
-                                        
-                                        try {
-                                            hwKeyLauncher.launch(intent)
-                                        } catch (e: android.content.ActivityNotFoundException) {
-                                            try {
-                                                intent.action = "net.pp3345.ykdroid.intent.action.CHALLENGE_RESPONSE"
-                                                hwKeyLauncher.launch(intent)
-                                            } catch (e2: android.content.ActivityNotFoundException) {
-                                                viewModel.setUnlockError("No Hardware Key Driver installed. Please install KeePassDX Key Driver or ykDroid.")
+                                        // Build the Key Driver intent
+                                        val driverIntent = KeyDriverHelper.buildChallengeIntent(challengeBytes)
+                                        if (driverIntent != null) {
+                                            // Launch via TRANSPARENT PROXY — MainActivity stays in foreground
+                                            val proxyIntent = Intent(context, KeyDriverProxyActivity::class.java).apply {
+                                                putExtra(KeyDriverProxyActivity.EXTRA_DRIVER_INTENT, driverIntent)
                                             }
+                                            context.startActivity(proxyIntent)
+                                        } else {
+                                            viewModel.setUnlockError("No Hardware Key Driver installed. Please install KeePassDX Key Driver or ykDroid.")
                                         }
                                     }
                                 }
@@ -1283,24 +1294,10 @@ fun FileSelectRow(
 }
 @Composable
 fun SettingsScreen(viewModel: MainViewModel) {
+    val context = LocalContext.current
     val colors = LocalNeumorphicColors.current
     val diagnosticResult by viewModel.diagnosticResult.collectAsState()
     
-    val hwTestLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val responseBytes = result.data?.getByteArrayExtra("response")
-            if (responseBytes != null) {
-                val hexStr = responseBytes.joinToString("") { "%02x".format(it) }
-                val maskedHex = if (hexStr.length > 10) hexStr.take(6) + "..." + hexStr.takeLast(4) else hexStr
-                viewModel.setDiagnosticResult("Success! HMAC-SHA1 Response:\n$maskedHex")
-            } else {
-                viewModel.setDiagnosticResult("Failed: Null response signature.")
-            }
-        } else {
-            viewModel.setDiagnosticResult("Cancelled or failed.")
-        }
-    }
-
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = colors.background
@@ -1367,27 +1364,19 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         fontSize = 14.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    
                     NeumorphicButton(
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         onClick = {
                             viewModel.setDiagnosticResult("Awaiting physical hardware key...")
                             val dummyChallenge = "KeePassSD_Ping".toByteArray(Charsets.UTF_8)
-                            val paddedChallenge = ByteArray(32) { i -> if (i < dummyChallenge.size) dummyChallenge[i] else 0x0 }
-                            
-                            val intent = android.content.Intent("android.yubikey.intent.action.CHALLENGE_RESPONSE")
-                            intent.putExtra("challenge", paddedChallenge)
-                            intent.putExtra("purpose", "KeePassSD Diagnostics")
-                            
-                            try {
-                                hwTestLauncher.launch(intent)
-                            } catch (e: android.content.ActivityNotFoundException) {
-                                try {
-                                    intent.action = "net.pp3345.ykdroid.intent.action.CHALLENGE_RESPONSE"
-                                    hwTestLauncher.launch(intent)
-                                } catch (e2: android.content.ActivityNotFoundException) {
-                                    viewModel.setDiagnosticResult("Driver Not Installed! Please install KeePassDX Key Driver / ykDroid.")
+                            val driverIntent = KeyDriverHelper.buildChallengeIntent(dummyChallenge)
+                            if (driverIntent != null) {
+                                val proxyIntent = Intent(context, KeyDriverProxyActivity::class.java).apply {
+                                    putExtra(KeyDriverProxyActivity.EXTRA_DRIVER_INTENT, driverIntent)
                                 }
+                                context.startActivity(proxyIntent)
+                            } else {
+                                viewModel.setDiagnosticResult("Driver Not Installed! Please install KeePassDX Key Driver / ykDroid.")
                             }
                         },
                         innerPadding = 0.dp

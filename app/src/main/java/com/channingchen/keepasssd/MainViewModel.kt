@@ -19,6 +19,9 @@ import org.signal.argon2.Version
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okio.buffer
@@ -50,6 +53,45 @@ data class VaultGroup(
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    init { instance = this }
+
+    companion object {
+        /** Weak global reference so KeyDriverProxyActivity can relay its result back. */
+        var instance: MainViewModel? = null
+            private set
+    }
+
+    // Bridge: KeyDriverProxyActivity posts here, UnlockScreen collects
+    private val _hwKeyResult = MutableSharedFlow<Result<ByteArray?>>(extraBufferCapacity = 1)
+    val hwKeyResult: SharedFlow<Result<ByteArray?>> = _hwKeyResult.asSharedFlow()
+
+    /** Called by KeyDriverProxyActivity when the driver returns successfully (or with null) */
+    fun onHardwareKeyResponse(response: ByteArray?) {
+        viewModelScope.launch { 
+            _hwKeyResult.emit(Result.success(response))
+            if (_showSettings.value) {
+                _diagnosticResult.value = if (response != null) {
+                    "Success! Received signature: ${response.toHexString()}"
+                } else {
+                    "Hardware Key returned null or was cancelled."
+                }
+            }
+        }
+    }
+
+    /** Called by KeyDriverProxyActivity when the driver is not found */
+    fun onHardwareKeyError(message: String) {
+        viewModelScope.launch { 
+            _hwKeyResult.emit(Result.failure(Exception(message)))
+            if (_showSettings.value) {
+                _diagnosticResult.value = "Error: $message"
+            }
+        }
+    }
+
+    private fun ByteArray.toHexString(): String = joinToString("") { "%02x".format(it) }
+
     private val bleManager = BleUartManager.getInstance()
     val isBleConnected = bleManager.isConnected
     val isBleSending = bleManager.isSending

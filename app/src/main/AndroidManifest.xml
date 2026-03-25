@@ -21,13 +21,28 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.KeePassSD">
+            android:theme="@style/Theme.KeePassSD"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode|density"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            Transparent proxy Activity for YubiKey Key Driver interaction.
+            Modeled on KeePassDX's HardwareKeyActivity pattern.
+            MainActivity stays in foreground; this invisible Activity handles the driver round-trip.
+        -->
+        <activity
+            android:name=".KeyDriverProxyActivity"
+            android:theme="@style/Theme.Transparent"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+
     </application>
 
 </manifest>

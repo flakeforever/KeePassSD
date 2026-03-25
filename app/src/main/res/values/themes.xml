@@ -2,4 +2,15 @@
 <resources>
 
     <style name="Theme.KeePassSD" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Used by KeyDriverProxyActivity: invisible transparent window, sits over the main UI -->
+    <style name="Theme.Transparent" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+
 </resources>
