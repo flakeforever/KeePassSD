@@ -73,7 +73,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _hwKeyResult.emit(Result.success(response))
             if (_showSettings.value) {
                 _diagnosticResult.value = if (response != null) {
-                    "Success! Received signature: ${response.toHexString()}"
+                    val fullHex = response.toHexString()
+                    val masked = if (fullHex.length > 12) {
+                        "${fullHex.take(6)}...${fullHex.takeLast(6)}"
+                    } else fullHex
+                    "Success! Received signature: $masked"
                 } else {
                     "Hardware Key returned null or was cancelled."
                 }
