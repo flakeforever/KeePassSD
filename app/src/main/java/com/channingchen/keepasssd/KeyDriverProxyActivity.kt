@@ -38,13 +38,19 @@ class KeyDriverProxyActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val driverIntent = intent.getParcelableExtra<Intent>(EXTRA_DRIVER_INTENT)
-        if (driverIntent == null) {
-            MainViewModel.instance?.onHardwareKeyResponse(null)
-            finish()
-            return
+        
+        // CRITICAL FIX: Only launch the driver Intent if this is a fresh creation.
+        // If savedInstanceState != null, the Activity is being recreated by the system 
+        // (e.g., after returning from the USB permission prompt), so we must NOT re-trigger the intent.
+        if (savedInstanceState == null) {
+            val driverIntent = intent.getParcelableExtra<Intent>(EXTRA_DRIVER_INTENT)
+            if (driverIntent == null) {
+                MainViewModel.instance?.onHardwareKeyResponse(null)
+                finish()
+                return
+            }
+            tryLaunchDriver(driverIntent)
         }
-        tryLaunchDriver(driverIntent)
     }
 
     private fun tryLaunchDriver(intent: Intent) {

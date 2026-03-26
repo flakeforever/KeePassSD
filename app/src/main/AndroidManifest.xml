@@ -41,7 +41,8 @@
             android:theme="@style/Theme.Transparent"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:noHistory="true" />
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
 
     </application>
 
