@@ -14,7 +14,7 @@ class BleUartManager private constructor() {
         val UART_SERVICE_UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
         val RX_CHAR_UUID = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e") // Write to device
         val TX_CHAR_UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e") // Notify from device
-        const val DEVICE_NAME = "KP-Bridge"
+        const val DEVICE_NAME = "KPB-Bridge"
 
         @Volatile
         private var instance: BleUartManager? = null

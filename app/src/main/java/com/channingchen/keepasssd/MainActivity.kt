@@ -477,10 +477,22 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                     .fillMaxWidth()
                     .height(32.dp)
                     .clickable(
-                        enabled = isBleConnected && !isSending,
+                        enabled = !isSending,
                         onClick = {
-                            viewModel.fetchDeviceInfo()
-                            showInfoDialog = true
+                            if (isBleConnected) {
+                                viewModel.fetchDeviceInfo()
+                                showInfoDialog = true
+                            } else {
+                                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                        permissionLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+                                    } else {
+                                        viewModel.connectBle(context)
+                                    }
+                                } else {
+                                    viewModel.connectBle(context)
+                                }
+                            }
                         }
                     ),
                 horizontalArrangement = Arrangement.Center,
