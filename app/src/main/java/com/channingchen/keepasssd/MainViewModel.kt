@@ -48,6 +48,7 @@ data class VaultItem(
 data class VaultGroup(
     val name: String,
     val items: List<VaultItem>,
+    val subGroups: List<VaultGroup>,
     val standardIconId: Int,
     val customIconData: ByteArray?
 )
@@ -111,8 +112,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     var database: KeePassDatabase? = null
 
-    private val _vaultGroups = MutableStateFlow<List<VaultGroup>>(emptyList())
-    val vaultGroups: StateFlow<List<VaultGroup>> = _vaultGroups
+    private val _rootGroup = MutableStateFlow<VaultGroup?>(null)
+    val rootGroup: StateFlow<VaultGroup?> = _rootGroup
 
     private val prefs = application.getSharedPreferences("keepasssd_prefs", Context.MODE_PRIVATE)
 
@@ -173,7 +174,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resetState() {
         _unlockState.value = UnlockState.Idle
         database = null
-        _vaultGroups.value = emptyList()
+        _rootGroup.value = null
         _canUndo.value = false
     }
     
@@ -336,10 +337,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         kdfProvider = NativeKdfProvider()
                     )
                     
-                    val rootGroup = database!!.content.group
                     val dbName = extractFileName(context, dbUri)
                     val customIcons = database!!.content.meta.customIcons
-                    _vaultGroups.value = extractGroups(rootGroup, dbName, customIcons)
+                    val rootGroupVal = database!!.content.group
+                    
+                    _rootGroup.value = extractGroups(rootGroupVal, dbName, customIcons).firstOrNull()
                 }
 
                 val dbName = extractFileName(context, dbUri)
@@ -394,7 +396,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun extractGroups(group: Group, parentName: String, customIcons: Map<UUID, app.keemobile.kotpass.models.CustomIcon>): List<VaultGroup> {
-        val result = mutableListOf<VaultGroup>()
         val currentGroupName = group.name.ifEmpty { parentName }
         val groupCustomIcon = group.customIconUuid?.let { customIcons[it]?.data }
         
@@ -406,14 +407,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             VaultItem(title, username, url, entry, currentGroupName, entry.icon.ordinal, itemCustomIcon)
         }
         
-        if (items.isNotEmpty()) {
-            result.add(VaultGroup(currentGroupName, items, group.icon.ordinal, groupCustomIcon))
+        val subGroups = group.groups.flatMap { subgroup ->
+            extractGroups(subgroup, currentGroupName, customIcons)
         }
-        
-        for (subgroup in group.groups) {
-            result.addAll(extractGroups(subgroup, currentGroupName, customIcons))
-        }
-        return result
+
+        // Return a single list containing the current group as a VaultGroup object
+        return listOf(VaultGroup(currentGroupName, items, subGroups, group.icon.ordinal, groupCustomIcon))
     }
 }
 

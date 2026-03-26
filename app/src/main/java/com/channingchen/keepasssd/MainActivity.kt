@@ -71,8 +71,9 @@ class MainActivity : ComponentActivity() {
                 val unlockState by viewModel.unlockState.collectAsState()
                 val showSettings by viewModel.showSettings.collectAsState()
                 
-                var currentScreen by remember { mutableStateOf("Unlock") }
                 val context = LocalContext.current
+                
+                var currentScreen by remember { mutableStateOf("Unlock") }
 
                 LaunchedEffect(unlockState) {
                     val state = unlockState
@@ -182,10 +183,10 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
     var selectedItem by remember { mutableStateOf<VaultItem?>(null) }
     
     var showBottomSheet by remember { mutableStateOf(false) }
-    var currentViewedGroup by remember { mutableStateOf<VaultGroup?>(null) }
+    val groupStack = remember { mutableStateListOf<VaultGroup>() }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val vaultGroups by viewModel.vaultGroups.collectAsState()
+    val rootGroup by viewModel.rootGroup.collectAsState()
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -288,7 +289,15 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
 
                     // Global Independent Search Overlay
                     if (searchQuery.isNotEmpty()) {
-                        val allItems = vaultGroups.flatMap { it.items }
+                        val allItems = mutableListOf<VaultItem>()
+                        fun collectItems(g: VaultGroup?) {
+                            g?.let {
+                                allItems.addAll(it.items)
+                                it.subGroups.forEach { sub -> collectItems(sub) }
+                            }
+                        }
+                        collectItems(rootGroup)
+
                         val searchResults = allItems.filter {
                             it.title.contains(searchQuery, true) || it.username.contains(searchQuery, true)
                         }.take(15)
@@ -532,7 +541,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
             ModalBottomSheet(
                 onDismissRequest = { 
                     showBottomSheet = false
-                    currentViewedGroup = null
+                    groupStack.clear()
                 },
                 sheetState = sheetState,
                 containerColor = colors.background, // Match Neumorphism base color
@@ -544,13 +553,13 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (currentViewedGroup != null) {
-                            IconButton(onClick = { currentViewedGroup = null }) {
+                        if (groupStack.isNotEmpty()) {
+                            IconButton(onClick = { groupStack.removeAt(groupStack.size - 1) }) {
                                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = colors.textPrimary)
                             }
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = currentViewedGroup!!.name,
+                                text = groupStack.last().name,
                                 color = colors.textPrimary,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
@@ -573,97 +582,94 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                     // Drawer Scrollable Content
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 8.dp)
+                        contentPadding = PaddingValues(bottom = 16.dp)
                     ) {
-                        if (currentViewedGroup == null) {
-                            // SHOW GROUPS LIST
-                            if (vaultGroups.isEmpty()) {
-                                item {
-                                    Text(
-                                        "No groups found",
-                                        color = colors.textSecondary,
-                                        modifier = Modifier.padding(16.dp)
-                                    )
-                                }
-                            } else {
-                                items(vaultGroups) { group ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { currentViewedGroup = group }
-                                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            KeePassIcon(
-                                                standardIconId = group.standardIconId,
-                                                customIconData = group.customIconData,
-                                                tint = colors.textPrimary,
-                                                modifier = Modifier.size(32.dp)
-                                            )
-                                            Spacer(Modifier.width(16.dp))
-                                            Text(
-                                                text = group.name,
-                                                color = colors.textPrimary,
-                                                fontSize = 18.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-                                        Icon(Icons.Default.KeyboardArrowRight, null, tint = colors.textSecondary)
-                                    }
-                                    Divider(color = colors.darkShadow.copy(alpha=0.15f), modifier = Modifier.padding(horizontal = 16.dp))
-                                }
-                            }
-                        } else {
-                            // SHOW ITEMS IN SELECTED GROUP (No Search Filter)
-                            val groupItems = currentViewedGroup!!.items
+                        val currentSubGroups = if (groupStack.isEmpty()) rootGroup?.subGroups ?: emptyList() else groupStack.last().subGroups
+                        val currentItems = if (groupStack.isEmpty()) rootGroup?.items ?: emptyList() else groupStack.last().items
 
-                            if (groupItems.isEmpty()) {
-                                item {
-                                    Text(
-                                        "Empty group",
-                                        color = colors.textSecondary,
-                                        modifier = Modifier.padding(16.dp)
-                                    )
-                                }
-                            } else {
-                                items(groupItems) { item ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { 
-                                                selectedItem = item
-                                                showBottomSheet = false // closes drawer
-                                                focusManager.clearFocus()
-                                            }
-                                            .padding(horizontal = 24.dp, vertical = 16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
+                        // 1. SHOW SUBGROUPS
+                        if (currentSubGroups.isNotEmpty()) {
+                            items(currentSubGroups) { group ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { groupStack.add(group) }
+                                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         KeePassIcon(
-                                            standardIconId = item.standardIconId,
-                                            customIconData = item.customIconData,
-                                            tint = colors.textSecondary,
-                                            modifier = Modifier.size(28.dp)
+                                            standardIconId = group.standardIconId,
+                                            customIconData = group.customIconData,
+                                            tint = colors.textPrimary,
+                                            modifier = Modifier.size(30.dp)
                                         )
                                         Spacer(Modifier.width(16.dp))
-                                        Column {
+                                        Text(
+                                            text = group.name,
+                                            color = colors.textPrimary,
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    Icon(Icons.Default.KeyboardArrowRight, null, tint = colors.textSecondary.copy(alpha=0.6f), modifier = Modifier.size(20.dp))
+                                }
+                                Divider(color = colors.darkShadow.copy(alpha=0.1f), modifier = Modifier.padding(horizontal = 24.dp))
+                            }
+                        }
+
+                        // 2. SHOW ITEMS
+                        if (currentItems.isNotEmpty()) {
+                            // Add a small spacer or header if there were subgroups
+                            if (currentSubGroups.isNotEmpty()) {
+                                item { Spacer(Modifier.height(8.dp)) }
+                            }
+
+                            items(currentItems) { item ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { 
+                                            selectedItem = item
+                                            showBottomSheet = false // closes drawer
+                                            focusManager.clearFocus()
+                                        }
+                                        .padding(horizontal = 24.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    KeePassIcon(
+                                        standardIconId = item.standardIconId,
+                                        customIconData = item.customIconData,
+                                        tint = colors.accent.copy(alpha=0.8f),
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    Column {
+                                        Text(
+                                            text = if (item.title.isEmpty()) "Untitled" else item.title,
+                                            color = colors.textPrimary,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        if (item.username.isNotEmpty()) {
                                             Text(
-                                                text = if (item.title.isEmpty()) "Untitled" else item.title,
-                                                color = colors.textPrimary,
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                                text = item.username,
+                                                color = colors.textSecondary,
+                                                fontSize = 13.sp
                                             )
-                                            if (item.username.isNotEmpty()) {
-                                                Text(
-                                                    text = item.username,
-                                                    color = colors.textSecondary,
-                                                    fontSize = 14.sp
-                                                )
-                                            }
                                         }
                                     }
-                                    Divider(color = colors.darkShadow.copy(alpha=0.15f), modifier = Modifier.padding(horizontal = 16.dp))
+                                }
+                                Divider(color = colors.darkShadow.copy(alpha=0.08f), modifier = Modifier.padding(horizontal = 24.dp))
+                            }
+                        }
+
+                        // Empty State if none
+                        if (currentSubGroups.isEmpty() && currentItems.isEmpty()) {
+                            item {
+                                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                                    Text("This group is empty", color = colors.textSecondary)
                                 }
                             }
                         }
@@ -887,6 +893,7 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
         }
     }
 
+
     // Collect hardware key results relayed by KeyDriverProxyActivity via ViewModel SharedFlow
     LaunchedEffect(Unit) {
         viewModel.hwKeyResult.collect { result ->
@@ -1048,7 +1055,6 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                                         // Build the Key Driver intent
                                         val driverIntent = KeyDriverHelper.buildChallengeIntent(challengeBytes)
                                         if (driverIntent != null) {
-                                            // Launch via TRANSPARENT PROXY — MainActivity stays in foreground
                                             val proxyIntent = Intent(context, KeyDriverProxyActivity::class.java).apply {
                                                 putExtra(KeyDriverProxyActivity.EXTRA_DRIVER_INTENT, driverIntent)
                                             }
@@ -1363,26 +1369,26 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         color = colors.textSecondary,
                         fontSize = 14.sp
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    NeumorphicButton(
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        onClick = {
-                            viewModel.setDiagnosticResult("Awaiting physical hardware key...")
-                            val dummyChallenge = "KeePassSD_Ping".toByteArray(Charsets.UTF_8)
-                            val driverIntent = KeyDriverHelper.buildChallengeIntent(dummyChallenge)
-                            if (driverIntent != null) {
+
+            NeumorphicButton(
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                onClick = {
+                    viewModel.setDiagnosticResult("Awaiting physical hardware key...")
+                    val dummyChallenge = "KeePassSD_Ping".toByteArray(Charsets.UTF_8)
+                    val driverIntent = KeyDriverHelper.buildChallengeIntent(dummyChallenge)
+                    if (driverIntent != null) {
                                 val proxyIntent = Intent(context, KeyDriverProxyActivity::class.java).apply {
                                     putExtra(KeyDriverProxyActivity.EXTRA_DRIVER_INTENT, driverIntent)
                                 }
                                 context.startActivity(proxyIntent)
-                            } else {
-                                viewModel.setDiagnosticResult("Driver Not Installed! Please install KeePassDX Key Driver / ykDroid.")
-                            }
-                        },
-                        innerPadding = 0.dp
-                    ) {
-                        Text("Test Hardware Key", color = colors.textPrimary, fontWeight = FontWeight.Bold)
+                    } else {
+                        viewModel.setDiagnosticResult("Driver Not Installed! Please install KeePassDX Key Driver / ykDroid.")
                     }
+                },
+                innerPadding = 0.dp
+            ) {
+                Text("Test Hardware Key", color = colors.textPrimary, fontWeight = FontWeight.Bold)
+            }
                     
                     if (diagnosticResult.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(16.dp))
