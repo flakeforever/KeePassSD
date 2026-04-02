@@ -165,7 +165,11 @@ last_interaction = time.monotonic()
 while True:
     # --- 1. Advertising Loop ---
     if not ble.connected:
-        ble.start_advertising(adv)
+        try:
+            ble.start_advertising(adv)
+        except Exception:
+            pass
+            
         ui.update(st="SCAN ME", ac="IDLE", ac_col=COLOR_YELLOW)
         while not ble.connected:
             # Monitor BOOT button for forced reboot
@@ -181,38 +185,50 @@ while True:
             if (time.monotonic() - last_interaction) > SCREEN_TIMEOUT: ui.sleep()
             time.sleep(0.1)
         
-        ble.stop_advertising()
+        try:
+            ble.stop_advertising()
+        except:
+            pass
+            
         ui.wake()
         last_interaction = time.monotonic()
 
     # --- 2. Connected Session ---
     already_secure = False
     while ble.connected:
-        # Continuously monitor BOOT button
-        if not boot_btn.value:
-            press_start = time.monotonic()
-            while not boot_btn.value:
-                if time.monotonic() - press_start > 3.0:
-                    ui.update(st="REBOOT", ac="DEV MODE", ac_col=COLOR_RED)
-                    time.sleep(1)
-                    microcontroller.reset()
-                time.sleep(0.1)
+        try:
+            # Continuously monitor BOOT button
+            if not boot_btn.value:
+                press_start = time.monotonic()
+                while not boot_btn.value:
+                    if time.monotonic() - press_start > 3.0:
+                        ui.update(st="REBOOT", ac="DEV MODE", ac_col=COLOR_RED)
+                        time.sleep(1)
+                        microcontroller.reset()
+                    time.sleep(0.1)
 
-        is_paired = any(conn.paired for conn in ble.connections)
-        if is_paired and not already_secure:
-            ui.update(st="SECURE", ac="READY", ac_col=COLOR_GREEN)
-            already_secure = True
-            last_interaction = time.monotonic()
-        
-        if uart.in_waiting:
-            last_interaction = time.monotonic()
-            try:
-                data = uart.read(uart.in_waiting).decode("utf-8").strip()
-                if data: handler.handle(data, is_paired)
-            except: pass
+            is_paired = any(conn.paired for conn in ble.connections)
+            if is_paired and not already_secure:
+                ui.update(st="SECURE", ac="READY", ac_col=COLOR_GREEN)
+                already_secure = True
+                last_interaction = time.monotonic()
+            
+            if uart.in_waiting:
+                last_interaction = time.monotonic()
+                try:
+                    data = uart.read(uart.in_waiting).decode("utf-8").strip()
+                    if data: handler.handle(data, is_paired)
+                except Exception: 
+                    pass
+
+        except Exception as e:
+            # Catch exceptions caused by abrupt disconnections to prevent script crash
+            print("BLE session error:", e)
+            break
 
         if (time.monotonic() - last_interaction) > SCREEN_TIMEOUT: ui.sleep()
         time.sleep(0.01)
 
     ui.update(st="OFFLINE", ac="DISCON.", ac_col=COLOR_RED)
-    last_interaction = time.monotonic(); time.sleep(1)
+    last_interaction = time.monotonic()
+    time.sleep(1)
