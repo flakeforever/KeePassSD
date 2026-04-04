@@ -45,6 +45,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -60,6 +61,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.channingchen.keepasssd.ui.theme.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardActionScope
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.input.ImeAction
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -414,7 +424,7 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                         
                         Spacer(Modifier.height(24.dp))
                         
-                        ReadOnlyField(value = if(item.username.isEmpty()) "(No Username)" else item.username)
+                        LCDDisplay(text = if(item.username.isEmpty()) "(No Username)" else item.username)
                     }
                 } else {
                     Column(
@@ -688,6 +698,208 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LCDDisplay(text: String, modifier: Modifier = Modifier) {
+    // --- LCD Color Palette (reflective LCD, matching reference image) ---
+    // Bright olive-grey-green: the classic "bistable reflective" LCD look
+    val lcdBase       = Color(0xFFC2CDB8) // bright reflective panel base
+    val lcdHighlight  = Color(0xFFD8E4CE) // lighter top for backlight gradient (the "lit" zone)
+    val lcdShadowBase = Color(0xFFAAB8A2) // slightly darker lower zone
+    val lcdInkColor   = Color(0xFF2D3E2A) // deep olive-green ink, classic LCD pixel color
+    val lcdInkShadow  = Color(0xFF1A2418).copy(alpha = 0.35f) // ink drop-shadow
+    val lcdInkHighlight = Color(0xFF4A5C45).copy(alpha = 0.45f) // ink top-edge glass lensing
+    val lcdGlassSheen = Color.White       // specular glass highlight
+
+    // Outer border colors for the recessed inset frame effect
+    val borderDark    = Color(0xFF8A9485).copy(alpha = 0.85f) // top-left inner dark rim
+    val borderLight   = Color(0xFFDFEBD6).copy(alpha = 0.70f) // bottom-right inner light rim
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        // ── OUTER FRAME: Neumorphic inset border (the recessed bezel) ──
+        // We draw the bezel using a drawBehind with an asymmetric inner-shadow
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .drawBehind {
+                    val cornerPx = 0f
+                    val strokeW  = 2.5.dp.toPx()
+
+                    // Top-left dark bevels (recessed feel: dark on top/left inside)
+                    drawIntoCanvas { canvas ->
+                        val paint = android.graphics.Paint().apply {
+                            isAntiAlias = true
+                            style = android.graphics.Paint.Style.STROKE
+                            strokeWidth = strokeW
+                            setShadowLayer(6f, 2f, 2f, borderDark.copy(alpha = 0.6f).toArgb())
+                            color = borderDark.toArgb()
+                        }
+                        // Top border segment
+                        canvas.nativeCanvas.drawRoundRect(
+                            strokeW / 2, strokeW / 2,
+                            size.width - strokeW / 2, size.height - strokeW / 2,
+                            cornerPx, cornerPx,
+                            paint
+                        )
+                    }
+                }
+        ) {
+            // ── LCD PANEL SURFACE ──
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(2.dp) // inner inset from bezel edge
+                    .drawWithContent {
+                        val contentScope = this  // capture ContentDrawScope before entering clipPath
+                        val cornerPx = 0f
+
+                        // ── Clip all drawing to the rounded rect boundary ──
+                        // This prevents any drawRect/drawLine from bleeding into the corners.
+                        val clipPath = androidx.compose.ui.graphics.Path().apply {
+                            addRoundRect(
+                                androidx.compose.ui.geometry.RoundRect(
+                                    left = 0f, top = 0f,
+                                    right = size.width, bottom = size.height,
+                                    radiusX = cornerPx, radiusY = cornerPx
+                                )
+                            )
+                        }
+                        clipPath(clipPath) {
+
+                            // ── PASS 1: Reflective backlight gradient (brighter top → dimmer bottom) ──
+                            val backlightBrush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                colors = listOf(lcdHighlight, lcdBase, lcdShadowBase),
+                                startY = 0f,
+                                endY = size.height
+                            )
+                            drawRect(brush = backlightBrush)
+
+                            // ── PASS 2: Subtle pixel/scanline texture ──
+                            val lineSpacingPx = 2.8.dp.toPx()
+                            var y = lineSpacingPx
+                            while (y < size.height) {
+                                drawLine(
+                                    color = Color.Black.copy(alpha = 0.025f),
+                                    start = androidx.compose.ui.geometry.Offset(0f, y),
+                                    end = androidx.compose.ui.geometry.Offset(size.width, y),
+                                    strokeWidth = 0.8.dp.toPx()
+                                )
+                                y += lineSpacingPx
+                            }
+
+                            // ── PASS 3: Concave inner-wall shading (recessed bowl effect) ──
+                            // Top wall
+                            drawRect(
+                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(Color.Black.copy(alpha = 0.22f), Color.Transparent),
+                                    startY = 0f, endY = size.height * 0.30f
+                                )
+                            )
+                            // Left wall
+                            drawRect(
+                                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                    colors = listOf(Color.Black.copy(alpha = 0.14f), Color.Transparent),
+                                    startX = 0f, endX = size.width * 0.15f
+                                )
+                            )
+                            // Bottom wall highlight
+                            drawRect(
+                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.11f)),
+                                    startY = size.height * 0.72f, endY = size.height
+                                )
+                            )
+                            // Right wall highlight
+                            drawRect(
+                                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                    colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.07f)),
+                                    startX = size.width * 0.84f, endX = size.width
+                                )
+                            )
+
+                            // ── Draw text content ──
+                            contentScope.drawContent()
+
+                            // ── PASS 4: Primary glass reflection ──
+                            val reflectionHeight = size.height * 0.46f
+                            drawRect(
+                                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                    colors = listOf(
+                                        lcdGlassSheen.copy(alpha = 0.0f),
+                                        lcdGlassSheen.copy(alpha = 0.18f),
+                                        lcdGlassSheen.copy(alpha = 0.28f),
+                                        lcdGlassSheen.copy(alpha = 0.18f),
+                                        lcdGlassSheen.copy(alpha = 0.0f)
+                                    ),
+                                    start = androidx.compose.ui.geometry.Offset(size.width * 0.02f, 0f),
+                                    end = androidx.compose.ui.geometry.Offset(size.width * 0.80f, reflectionHeight)
+                                ),
+                                size = androidx.compose.ui.geometry.Size(size.width, reflectionHeight)
+                            )
+
+                            // ── PASS 5: Bottom rim sheen ──
+                            drawRect(
+                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, lcdGlassSheen.copy(alpha = 0.07f)),
+                                    startY = size.height * 0.82f, endY = size.height
+                                )
+                            )
+
+                            // ── PASS 6: Thin bright highlight line at very top edge ──
+                            drawLine(
+                                color = lcdGlassSheen.copy(alpha = 0.45f),
+                                start = androidx.compose.ui.geometry.Offset(cornerPx, 0f),
+                                end = androidx.compose.ui.geometry.Offset(size.width - cornerPx, 0f),
+                                strokeWidth = 1.2.dp.toPx()
+                            )
+                        }
+                    }
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                // ── Text rendering: "ink under glass" layered effect ──
+                Box {
+                    // Layer 1: Ink drop-shadow (absorption into substrate)
+                    Text(
+                        text = text,
+                        color = lcdInkShadow,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        letterSpacing = 1.0.sp,
+                        modifier = Modifier.offset(x = 0.8.dp, y = 1.2.dp)
+                    )
+                    // Layer 2: Top-edge ink highlight (glass lensing the ink color upward)
+                    Text(
+                        text = text,
+                        color = lcdInkHighlight,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        letterSpacing = 1.0.sp,
+                        modifier = Modifier.offset(x = 0.dp, y = (-0.7).dp)
+                    )
+                    // Layer 3: Main ink body
+                    Text(
+                        text = text,
+                        color = lcdInkColor,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        letterSpacing = 1.0.sp
+                    )
                 }
             }
         }
@@ -1022,7 +1234,31 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                 onToggleVisibility = { passwordVisible = !passwordVisible },
                 showVisibilityToggle = true,
                 switchChecked = usePassword,
-                onSwitchChange = { usePassword = it }
+                onSwitchChange = { usePassword = it },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        if (databaseUri != null && unlockState !is UnlockState.Loading) {
+                            if (useHwKey && hwKey == "YubiKey Challenge-Response") {
+                                viewModel.requestYubiKeyChallenge(context, databaseUri!!) { challengeBytes ->
+                                    if (challengeBytes != null) {
+                                        val driverIntent = KeyDriverHelper.buildChallengeIntent(challengeBytes)
+                                        if (driverIntent != null) {
+                                            val proxyIntent = Intent(context, KeyDriverProxyActivity::class.java).apply {
+                                                putExtra(KeyDriverProxyActivity.EXTRA_DRIVER_INTENT, driverIntent)
+                                            }
+                                            context.startActivity(proxyIntent)
+                                        } else {
+                                            viewModel.setUnlockError("No Hardware Key Driver installed.")
+                                        }
+                                    }
+                                }
+                            } else {
+                                viewModel.unlockDatabase(context, databaseUri!!, password, if (useKeyfile) keyfileUri else null, null, useKeyfile, hwKey, useHwKey)
+                            }
+                        }
+                    }
+                )
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -1115,7 +1351,9 @@ fun InputRow(
     onToggleVisibility: () -> Unit,
     showVisibilityToggle: Boolean,
     switchChecked: Boolean,
-    onSwitchChange: (Boolean) -> Unit
+    onSwitchChange: (Boolean) -> Unit,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default
 ) {
     val colors = LocalNeumorphicColors.current
 
@@ -1143,8 +1381,27 @@ fun InputRow(
                     focusedTextColor = colors.textPrimary,
                     unfocusedTextColor = colors.textPrimary
                 ),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onKeyEvent {
+                        if (it.key == Key.Enter || it.key == Key.NumPadEnter) {
+                            if (it.type == KeyEventType.KeyUp) {
+                                // Trigger the IME action manually if onKeyEvent handles it
+                                keyboardActions.onDone?.let { action ->
+                                    action(object : KeyboardActionScope {
+                                        override fun defaultKeyboardAction(imeAction: ImeAction) {}
+                                    })
+                                }
+                            }
+                            true // Consume to prevent newline
+                        } else {
+                            false
+                        }
+                    },
                 textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
+                singleLine = true,
+                keyboardOptions = keyboardOptions,
+                keyboardActions = keyboardActions,
                 visualTransformation = if (isObscured) PasswordVisualTransformation() else VisualTransformation.None,
                 trailingIcon = {
                     if (showVisibilityToggle) {

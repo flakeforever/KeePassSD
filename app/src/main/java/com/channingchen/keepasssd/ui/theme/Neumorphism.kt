@@ -305,6 +305,19 @@ fun NeumorphicSwitch(
         animationSpec = tween(300),
         label = "TrackColor"
     )
+    
+    // Dynamic shadows for the thumb. When the track is red, the thumb's shadow falls on the red surface,
+    // so using grey/white causes ugly halos. We tint the shadow to match the red background.
+    val thumbDarkShadow by animateColorAsState(
+        targetValue = if (checked) colors.darkShadow else Color(0xFFC62828).copy(alpha = 0.5f),
+        animationSpec = tween(300),
+        label = "ThumbDarkShadow"
+    )
+    val thumbLightShadow by animateColorAsState(
+        targetValue = if (checked) colors.lightShadow else Color(0xFFFFCDD2).copy(alpha = 0.5f),
+        animationSpec = tween(300),
+        label = "ThumbLightShadow"
+    )
 
     val onTextAlpha by animateFloatAsState(if (checked) 0.7f else 0f, label = "OnAlpha")
     val offTextAlpha by animateFloatAsState(if (checked) 0f else 0.7f, label = "OffAlpha")
@@ -360,8 +373,8 @@ fun NeumorphicSwitch(
                 .size(thumbSize)
                 .neumorphic(
                     backgroundColor = colors.background,
-                    lightShadowColor = colors.lightShadow,
-                    darkShadowColor = colors.darkShadow,
+                    lightShadowColor = thumbLightShadow,
+                    darkShadowColor = thumbDarkShadow,
                     cornerRadius = 8.dp,
                     elevation = 4.dp
                 ),
