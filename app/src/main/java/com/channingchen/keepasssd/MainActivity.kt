@@ -380,7 +380,9 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(152.dp),
-                cornerRadius = 24.dp
+                cornerRadius = 24.dp,
+                hasPremiumBorder = true,
+                borderAlpha = 0.85f // High contrast for the premium feel
             ) {
                 if (selectedItem != null) {
                     val item = selectedItem!!
@@ -750,8 +752,15 @@ fun ActionButtons(viewModel: MainViewModel, selectedItem: VaultItem?) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (isSending) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.accent)
-                        Spacer(Modifier.width(8.dp))
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = colors.textPrimary
+                        )
                     }
+                    Spacer(Modifier.width(10.dp))
                     Text("Username", color = if (isSending) colors.accent else colors.textPrimary, fontWeight = FontWeight.Bold)
                 }
             }
@@ -765,8 +774,15 @@ fun ActionButtons(viewModel: MainViewModel, selectedItem: VaultItem?) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (isSending) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.accent)
-                        Spacer(Modifier.width(8.dp))
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.VpnKey,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = colors.textPrimary
+                        )
                     }
+                    Spacer(Modifier.width(10.dp))
                     Text("Password", color = if (isSending) colors.accent else colors.textPrimary, fontWeight = FontWeight.Bold)
                 }
             }
@@ -1009,7 +1025,7 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                 onSwitchChange = { usePassword = it }
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Keyfile Row
             FileSelectRow(
@@ -1024,7 +1040,7 @@ fun UnlockScreen(viewModel: MainViewModel, unlockState: UnlockState) {
                 onSwitchChange = { useKeyfile = it }
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Hardware Key Row
             val hwOptions = listOf("None", "YubiKey Challenge-Response")
@@ -1110,14 +1126,14 @@ fun InputRow(
         NeumorphicCard(
             modifier = Modifier
                 .weight(1f)
-                .height(64.dp),
-            cornerRadius = 16.dp,
+                .height(52.dp),
+            cornerRadius = 14.dp,
             innerPadding = 0.dp
         ) {
             TextField(
                 value = value,
                 onValueChange = onValueChange,
-                placeholder = { Text(label, color = colors.textSecondary) },
+                placeholder = { Text(label, color = colors.textSecondary, fontSize = 14.sp) },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,
@@ -1128,13 +1144,16 @@ fun InputRow(
                     unfocusedTextColor = colors.textPrimary
                 ),
                 modifier = Modifier.fillMaxSize(),
+                textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
                 visualTransformation = if (isObscured) PasswordVisualTransformation() else VisualTransformation.None,
                 trailingIcon = {
                     if (showVisibilityToggle) {
                         IconButton(onClick = onToggleVisibility) {
-                            Text(
-                                text = if (isObscured) "🙈" else "👁",
-                                fontSize = 20.sp
+                            Icon(
+                                imageVector = if (isObscured) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (isObscured) "Show" else "Hide",
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -1144,16 +1163,9 @@ fun InputRow(
         
         Spacer(modifier = Modifier.width(16.dp))
         
-        Switch(
+        NeumorphicSwitch(
             checked = switchChecked,
-            onCheckedChange = onSwitchChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.accent,
-                checkedTrackColor = colors.accent.copy(alpha = 0.3f),
-                uncheckedThumbColor = colors.textSecondary,
-                uncheckedTrackColor = colors.background,
-                uncheckedBorderColor = colors.darkShadow
-            )
+            onCheckedChange = onSwitchChange
         )
     }
 }
@@ -1174,12 +1186,12 @@ fun DropdownRow(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.weight(1f).height(64.dp)) {
+        Box(modifier = Modifier.weight(1f).height(52.dp)) {
             NeumorphicCard(
                 modifier = Modifier
                     .fillMaxSize()
                     .clickable { expanded = true },
-                cornerRadius = 16.dp,
+                cornerRadius = 14.dp,
                 innerPadding = 0.dp
             ) {
                 Row(
@@ -1191,12 +1203,14 @@ fun DropdownRow(
                 ) {
                     Text(
                         text = if (selectedValue.isEmpty()) label else selectedValue,
-                        color = if (selectedValue.isEmpty() || selectedValue == "None") colors.textSecondary else colors.textPrimary
+                        color = if (selectedValue.isEmpty() || selectedValue == "None") colors.textSecondary else colors.textPrimary,
+                        fontSize = 14.sp
                     )
                     Icon(
                         imageVector = Icons.Default.ArrowDropDown,
                         contentDescription = null,
-                        tint = colors.textSecondary
+                        tint = colors.textSecondary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -1208,7 +1222,7 @@ fun DropdownRow(
             ) {
                 options.forEach { option ->
                     DropdownMenuItem(
-                        text = { Text(option, color = colors.textPrimary) },
+                        text = { Text(option, color = colors.textPrimary, fontSize = 14.sp) },
                         onClick = {
                             onValueSelected(option)
                             expanded = false
@@ -1220,16 +1234,9 @@ fun DropdownRow(
         
         Spacer(modifier = Modifier.width(16.dp))
         
-        Switch(
+        NeumorphicSwitch(
             checked = switchChecked,
-            onCheckedChange = onSwitchChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.accent,
-                checkedTrackColor = colors.accent.copy(alpha = 0.3f),
-                uncheckedThumbColor = colors.textSecondary,
-                uncheckedTrackColor = colors.background,
-                uncheckedBorderColor = colors.darkShadow
-            )
+            onCheckedChange = onSwitchChange
         )
     }
 }
@@ -1253,8 +1260,8 @@ fun FileSelectRow(
         NeumorphicCard(
             modifier = Modifier
                 .weight(1f)
-                .height(64.dp),
-            cornerRadius = 16.dp,
+                .height(52.dp),
+            cornerRadius = 14.dp,
             innerPadding = 0.dp
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -1262,7 +1269,7 @@ fun FileSelectRow(
                     value = selectedFile,
                     onValueChange = { },
                     readOnly = true,
-                    placeholder = { Text(label, color = colors.textSecondary) },
+                    placeholder = { Text(label, color = colors.textSecondary, fontSize = 14.sp) },
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,
@@ -1273,13 +1280,16 @@ fun FileSelectRow(
                         unfocusedTextColor = colors.textPrimary
                     ),
                     modifier = Modifier.fillMaxSize(),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 14.sp),
                     visualTransformation = if (isObscured && selectedFile.isNotEmpty()) PasswordVisualTransformation() else VisualTransformation.None,
                     trailingIcon = {
                         if (selectedFile.isNotEmpty()) {
                             IconButton(onClick = onToggleVisibility) {
-                                Text(
-                                    text = if (isObscured) "🙈" else "👁",
-                                    fontSize = 20.sp
+                                Icon(
+                                    imageVector = if (isObscured) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (isObscured) "Show" else "Hide",
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -1297,16 +1307,9 @@ fun FileSelectRow(
         
         Spacer(modifier = Modifier.width(16.dp))
         
-        Switch(
+        NeumorphicSwitch(
             checked = switchChecked,
-            onCheckedChange = onSwitchChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.accent,
-                checkedTrackColor = colors.accent.copy(alpha = 0.3f),
-                uncheckedThumbColor = colors.textSecondary,
-                uncheckedTrackColor = colors.background,
-                uncheckedBorderColor = colors.darkShadow
-            )
+            onCheckedChange = onSwitchChange
         )
     }
 }
@@ -1352,14 +1355,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Remember last opened file", color = colors.textPrimary, fontSize = 16.sp)
-                Switch(
+                Text("Remember last opened file", color = colors.textPrimary, fontSize = 14.sp)
+                NeumorphicSwitch(
                     checked = rememberLastFile,
-                    onCheckedChange = { viewModel.toggleRememberLastFile(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = colors.accent,
-                        checkedTrackColor = colors.accent.copy(alpha = 0.3f)
-                    )
+                    onCheckedChange = { viewModel.toggleRememberLastFile(it) }
                 )
             }
             Divider(color = colors.darkShadow.copy(alpha = 0.15f))
@@ -1534,14 +1533,22 @@ fun DeviceInfoDialog(info: String?, onDismiss: () -> Unit) {
                         val version = parts.getOrNull(1) ?: "N/A"
                         val status = parts.getOrNull(2) ?: "GUEST"
                         
-                        // Vertical layout for Model to support long names
-                        Column(
+                        // Model layout: Label on left, Value on right (supporting multi-line if needed)
+                        Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            horizontalAlignment = Alignment.Start
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
                         ) {
                             Text("MODEL", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(4.dp))
-                            Text(model, color = colors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                text = model, 
+                                color = colors.textPrimary, 
+                                fontSize = 15.sp, 
+                                fontWeight = FontWeight.Medium,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                         
                         Divider(color = colors.darkShadow.copy(alpha = 0.05f), thickness = 1.dp)
