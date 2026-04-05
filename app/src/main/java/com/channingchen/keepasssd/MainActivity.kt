@@ -16,6 +16,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
@@ -46,6 +47,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -756,37 +758,87 @@ fun LCDDisplay(text: String, modifier: Modifier = Modifier) {
                     contentScale = ContentScale.Crop // Mantains ratio and fills the space
                 )
 
-                // ── Text rendering: Clean text with shadow ──
+                // ── Text rendering: HD44780 Dot-Matrix Text ──
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
-                    Box {
-                        // Layer 1: Ink drop-shadow
-                        Text(
-                            text = text,
-                            color = lcdInkShadow,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            letterSpacing = 1.0.sp,
-                            modifier = Modifier.offset(x = 0.8.dp, y = 1.2.dp)
-                        )
-                        // Layer 2: Main ink body
-                        Text(
-                            text = text,
-                            color = lcdInkColor,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            letterSpacing = 1.0.sp
-                        )
+                    DotMatrixText(
+                        text = text,
+                        dotColor = lcdInkColor,
+                        ghostColor = lcdInkColor.copy(alpha = 0.04f), // Super faint ghosting
+                        modifier = Modifier.fillMaxWidth().height(32.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Authentic HD44780 5x8 dot-matrix text renderer.
+ * Each character is rendered as a strictly defined grid of dots.
+ */
+@Composable
+fun DotMatrixText(
+    text: String,
+    dotColor: Color,
+    ghostColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val columns = 5
+        val rows = 8
+        
+        // --- AUTHENTIC FIXED DIMENSIONS ---
+        // Each dot is roughly 2.4dp wide
+        val dotW = 2.4.dp.toPx()
+        val dotH = 2.4.dp.toPx()
+        val dotSpacing = 0.8.dp.toPx()   // Internal gap between dots
+        val cellSpacingX = 4.0.dp.toPx() // Gap between character cells
+        
+        // Fixed dimensions for a single character cell (5x8 dots)
+        val charCellW = (columns * dotW) + ((columns - 1) * dotSpacing)
+        val charCellH = (rows * dotH) + ((rows - 1) * dotSpacing)
+        
+        val dotSize = androidx.compose.ui.geometry.Size(dotW, dotH)
+        val dotRadius = (dotW * 0.15f).coerceAtMost(2.dp.toPx())
+
+        // Calculate vertical offset to center the 8 rows in the available height
+        val charOffsetY = (size.height - charCellH) / 2f
+
+        // Calculate maximum slots that can fit in the container (e.g., standard 16 chars)
+        val maxSlots = ((size.width + cellSpacingX) / (charCellW + cellSpacingX)).toInt().coerceAtMost(16)
+        
+        clipRect {
+            for (slotIdx in 0 until maxSlots) {
+                val charOffsetX = slotIdx * (charCellW + cellSpacingX)
+                
+                // Get the bitmask for the current character if available, else empty (ghosting only)
+                val char = if (slotIdx < text.length) text[slotIdx] else ' '
+                val pattern = HD44780Font.getPattern(char)
+                
+                for (rowIdx in 0 until rows) {
+                    val rowByte = pattern[rowIdx].toInt()
+                    val y = charOffsetY + rowIdx * (dotH + dotSpacing)
+                    
+                    for (colIdx in 0 until columns) {
+                        val bitShift = 4 - colIdx
+                        val isOn = (rowByte shr bitShift) and 0x01 != 0
+                        
+                        val x = charOffsetX + colIdx * (dotW + dotSpacing)
+                        
+                        // Draw dot: either the ink color or the ghosting background
+                        if (x + dotW <= size.width) {
+                            drawRoundRect(
+                                color = if (isOn) dotColor else ghostColor,
+                                topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                                size = dotSize,
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(dotRadius)
+                            )
+                        }
                     }
                 }
             }
