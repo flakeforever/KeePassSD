@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import kotlinx.coroutines.delay
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -788,56 +789,92 @@ fun DotMatrixText(
     ghostColor: Color,
     modifier: Modifier = Modifier
 ) {
-    Canvas(modifier = modifier) {
-        val columns = 5
-        val rows = 8
+    // Auth-HD44780 fixed constants for sizing
+    val dotW = 2.4.dp
+    val dotH = 2.4.dp
+    val dotSpacing = 0.8.dp
+    val cellSpacingX = 4.0.dp
+    
+    val columns = 5
+    val rows = 8
+
+    BoxWithConstraints(modifier = modifier) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val widthPx = constraints.maxWidth.toFloat()
         
-        // --- AUTHENTIC FIXED DIMENSIONS ---
-        // Each dot is roughly 2.4dp wide
-        val dotW = 2.4.dp.toPx()
-        val dotH = 2.4.dp.toPx()
-        val dotSpacing = 0.8.dp.toPx()   // Internal gap between dots
-        val cellSpacingX = 4.0.dp.toPx() // Gap between character cells
+        // --- AUTHENTIC FIXED DIMENSIONS IN PX ---
+        val dotWPx = with(density) { dotW.toPx() }
+        val dotHPx = with(density) { dotH.toPx() }
+        val dotSpacingPx = with(density) { dotSpacing.toPx() }
+        val cellSpacingXPx = with(density) { cellSpacingX.toPx() }
         
         // Fixed dimensions for a single character cell (5x8 dots)
-        val charCellW = (columns * dotW) + ((columns - 1) * dotSpacing)
-        val charCellH = (rows * dotH) + ((rows - 1) * dotSpacing)
+        val charCellWPx = (columns * dotWPx) + ((columns - 1) * dotSpacingPx)
+        val charCellHPx = (rows * dotHPx) + ((rows - 1) * dotSpacingPx)
         
-        val dotSize = androidx.compose.ui.geometry.Size(dotW, dotH)
-        val dotRadius = (dotW * 0.15f).coerceAtMost(2.dp.toPx())
-
-        // Calculate vertical offset to center the 8 rows in the available height
-        val charOffsetY = (size.height - charCellH) / 2f
-
         // Calculate maximum slots that can fit in the container (e.g., standard 16 chars)
-        val maxSlots = ((size.width + cellSpacingX) / (charCellW + cellSpacingX)).toInt().coerceAtMost(16)
-        
-        clipRect {
-            for (slotIdx in 0 until maxSlots) {
-                val charOffsetX = slotIdx * (charCellW + cellSpacingX)
+        val maxSlots = ((widthPx + cellSpacingXPx) / (charCellWPx + cellSpacingXPx)).toInt().coerceAtMost(16)
+
+        // --- Marquee Animation Logic ---
+        var scrollIndex by remember(text) { mutableStateOf(0) }
+        val overflow = text.length > maxSlots
+
+        if (overflow) {
+            LaunchedEffect(text, maxSlots) {
+                val delayDuration = 2000L // 2s pause at start and end
+                val scrollSpeed = 300L   // 300ms per character
                 
-                // Get the bitmask for the current character if available, else empty (ghosting only)
-                val char = if (slotIdx < text.length) text[slotIdx] else ' '
-                val pattern = HD44780Font.getPattern(char)
-                
-                for (rowIdx in 0 until rows) {
-                    val rowByte = pattern[rowIdx].toInt()
-                    val y = charOffsetY + rowIdx * (dotH + dotSpacing)
+                while (true) {
+                    scrollIndex = 0
+                    delay(delayDuration)
                     
-                    for (colIdx in 0 until columns) {
-                        val bitShift = 4 - colIdx
-                        val isOn = (rowByte shr bitShift) and 0x01 != 0
+                    val maxScroll = text.length - maxSlots
+                    for (i in 1..maxScroll) {
+                        delay(scrollSpeed)
+                        scrollIndex = i
+                    }
+                    
+                    delay(delayDuration)
+                    // Animation wraps back to 0 automatically in the next loop
+                }
+            }
+        }
+
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val dotSize = androidx.compose.ui.geometry.Size(dotWPx, dotHPx)
+            val dotRadius = (dotWPx * 0.15f).coerceAtMost(2.dp.toPx())
+
+            // Calculate vertical offset to center the 8 rows in the available height
+            val charOffsetY = (size.height - charCellHPx) / 2f
+
+            clipRect {
+                for (slotIdx in 0 until maxSlots) {
+                    val charOffsetX = slotIdx * (charCellWPx + cellSpacingXPx)
+                    
+                    // Use scrollIndex to shift the visible window of the text
+                    val actualIdx = slotIdx + scrollIndex
+                    val char = if (actualIdx < text.length) text[actualIdx] else ' '
+                    val pattern = HD44780Font.getPattern(char)
+                    
+                    for (rowIdx in 0 until rows) {
+                        val rowByte = pattern[rowIdx].toInt()
+                        val y = charOffsetY + rowIdx * (dotHPx + dotSpacingPx)
                         
-                        val x = charOffsetX + colIdx * (dotW + dotSpacing)
-                        
-                        // Draw dot: either the ink color or the ghosting background
-                        if (x + dotW <= size.width) {
-                            drawRoundRect(
-                                color = if (isOn) dotColor else ghostColor,
-                                topLeft = androidx.compose.ui.geometry.Offset(x, y),
-                                size = dotSize,
-                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(dotRadius)
-                            )
+                        for (colIdx in 0 until columns) {
+                            val bitShift = 4 - colIdx
+                            val isOn = (rowByte shr bitShift) and 0x01 != 0
+                            
+                            val x = charOffsetX + colIdx * (dotWPx + dotSpacingPx)
+                            
+                            // Draw dot: either the ink color or the ghosting background
+                            if (x + dotWPx <= size.width) {
+                                drawRoundRect(
+                                    color = if (isOn) dotColor else ghostColor,
+                                    topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                                    size = dotSize,
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(dotRadius)
+                                )
+                            }
                         }
                     }
                 }
@@ -845,6 +882,7 @@ fun DotMatrixText(
         }
     }
 }
+
 
 @Composable
 fun ReadOnlyField(value: String) {
