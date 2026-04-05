@@ -10,7 +10,7 @@ KeePassSD is a unique experiment in software development: **100% of its code was
 ## 📱 Screenshots
 | Unlock Screen | Device Info | Main Screen | Settings Screen |
 | :---: | :---: | :---: | :---: |
-| <img src="screenshots/Screenshot_20260326-204614_KeePassSD.png" width="200"> | <img src="screenshots/Screenshot_20260326-210405_KeePassSD.png" width="200"> | <img src="screenshots/Screenshot_20260326-211034_KeePassSD.png" width="200"> | <img src="screenshots/Screenshot_20260326-210218_KeePassSD.png" width="200"> |
+| <img src="screenshots/KeePassSD-Unlocking.png" width="200"> | <img src="screenshots/KeePassSD-DeviceInfo.png" width="200"> | <img src="screenshots/KeePassSD-Main.png" width="200"> | <img src="screenshots/KeePassSD-Settings.png" width="200"> |
 
 ## 📖 What is KeePassSD?
 KeePassSD is a "Read-Only" companion for your KeePass (.kdbx) database. It is designed with a specific philosophy: **Minimalism + Physical Security**.

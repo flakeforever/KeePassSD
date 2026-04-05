@@ -75,6 +75,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.input.ImeAction
+import com.channingchen.keepasssd.R
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1671,11 +1672,10 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        Icons.Default.VerifiedUser,
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_launcher_foreground),
                         contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = colors.accent
+                        modifier = Modifier.size(80.dp)
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
@@ -1686,7 +1686,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Version 1.0.0-beta",
+                        "Version 1.0.7",
                         color = colors.textSecondary,
                         fontSize = 14.sp
                     )
