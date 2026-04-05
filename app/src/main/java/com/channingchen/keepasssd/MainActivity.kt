@@ -57,6 +57,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -706,15 +708,11 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
 
 @Composable
 fun LCDDisplay(text: String, modifier: Modifier = Modifier) {
-    // --- LCD Color Palette (reflective LCD, matching reference image) ---
-    // Bright olive-grey-green: the classic "bistable reflective" LCD look
-    val lcdBase       = Color(0xFFC2CDB8) // bright reflective panel base
-    val lcdHighlight  = Color(0xFFD8E4CE) // lighter top for backlight gradient (the "lit" zone)
-    val lcdShadowBase = Color(0xFFAAB8A2) // slightly darker lower zone
-    val lcdInkColor   = Color(0xFF2D3E2A) // deep olive-green ink, classic LCD pixel color
-    val lcdInkShadow  = Color(0xFF1A2418).copy(alpha = 0.35f) // ink drop-shadow
-    val lcdInkHighlight = Color(0xFF4A5C45).copy(alpha = 0.45f) // ink top-edge glass lensing
-    val lcdGlassSheen = Color.White       // specular glass highlight
+    // --- LCD Color Palette for Text Rendering (matching reference image ink) ---
+    val lcdInkColor     = Color(0xFF42523E) // Lower contrast olive-green ink
+    val lcdInkShadow    = Color(0xFF1A2418).copy(alpha = 0.20f) // Softened ink drop-shadow
+    val lcdInkHighlight = Color(0xFF4A5C45).copy(alpha = 0.30f) // Softened ink highlight
+    val lcdGlassSheen   = Color.White
 
     // Outer border colors for the recessed inset frame effect
     val borderDark    = Color(0xFF8A9485).copy(alpha = 0.85f) // top-left inner dark rim
@@ -722,7 +720,6 @@ fun LCDDisplay(text: String, modifier: Modifier = Modifier) {
 
     Box(modifier = modifier.fillMaxWidth()) {
         // ── OUTER FRAME: Neumorphic inset border (the recessed bezel) ──
-        // We draw the bezel using a drawBehind with an asymmetric inner-shadow
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -731,7 +728,7 @@ fun LCDDisplay(text: String, modifier: Modifier = Modifier) {
                     val cornerPx = 0f
                     val strokeW  = 2.5.dp.toPx()
 
-                    // Top-left dark bevels (recessed feel: dark on top/left inside)
+                    // Top-left dark bevels (recessed feel)
                     drawIntoCanvas { canvas ->
                         val paint = android.graphics.Paint().apply {
                             isAntiAlias = true
@@ -740,7 +737,6 @@ fun LCDDisplay(text: String, modifier: Modifier = Modifier) {
                             setShadowLayer(6f, 2f, 2f, borderDark.copy(alpha = 0.6f).toArgb())
                             color = borderDark.toArgb()
                         }
-                        // Top border segment
                         canvas.nativeCanvas.drawRoundRect(
                             strokeW / 2, strokeW / 2,
                             size.width - strokeW / 2, size.height - strokeW / 2,
@@ -750,91 +746,33 @@ fun LCDDisplay(text: String, modifier: Modifier = Modifier) {
                     }
                 }
         ) {
-            // ── LCD PANEL SURFACE ──
+            // ── LCD PANEL SURFACE: New Image Background ──
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(2.dp) // inner inset from bezel edge
-                    .drawWithContent {
-                        val contentScope = this  // capture ContentDrawScope before entering clipPath
-                        val cornerPx = 0f
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.lcd_bg),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop // Mantains ratio and fills the space
+                )
 
-                        // ── Clip all drawing to the rounded rect boundary ──
-                        // This prevents any drawRect/drawLine from bleeding into the corners.
-                        val clipPath = androidx.compose.ui.graphics.Path().apply {
-                            addRoundRect(
-                                androidx.compose.ui.geometry.RoundRect(
-                                    left = 0f, top = 0f,
-                                    right = size.width, bottom = size.height,
-                                    radiusX = cornerPx, radiusY = cornerPx
-                                )
-                            )
-                        }
-                        clipPath(clipPath) {
-
-                            // ── PASS 1: Reflective backlight gradient (brighter top → dimmer bottom) ──
-                            val backlightBrush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                colors = listOf(lcdHighlight, lcdBase, lcdShadowBase),
-                                startY = 0f,
-                                endY = size.height
-                            )
-                            drawRect(brush = backlightBrush)
-
-                            // ── PASS 2: Subtle pixel/scanline texture ──
-                            val lineSpacingPx = 2.8.dp.toPx()
-                            var y = lineSpacingPx
-                            while (y < size.height) {
-                                drawLine(
-                                    color = Color.Black.copy(alpha = 0.025f),
-                                    start = androidx.compose.ui.geometry.Offset(0f, y),
-                                    end = androidx.compose.ui.geometry.Offset(size.width, y),
-                                    strokeWidth = 0.8.dp.toPx()
-                                )
-                                y += lineSpacingPx
-                            }
-
-                            // ── PASS 3: Concave inner-wall shading (recessed bowl effect) ──
-                            // Top wall
-                            drawRect(
-                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                    colors = listOf(Color.Black.copy(alpha = 0.22f), Color.Transparent),
-                                    startY = 0f, endY = size.height * 0.30f
-                                )
-                            )
-                            // Left wall
-                            drawRect(
-                                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                    colors = listOf(Color.Black.copy(alpha = 0.14f), Color.Transparent),
-                                    startX = 0f, endX = size.width * 0.15f
-                                )
-                            )
-                            // Bottom wall highlight
-                            drawRect(
-                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.11f)),
-                                    startY = size.height * 0.72f, endY = size.height
-                                )
-                            )
-                            // Right wall highlight
-                            drawRect(
-                                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                    colors = listOf(Color.Transparent, Color.White.copy(alpha = 0.07f)),
-                                    startX = size.width * 0.84f, endX = size.width
-                                )
-                            )
-
-                            // ── Draw text content ──
-                            contentScope.drawContent()
-
-                            // ── PASS 4: Primary glass reflection ──
+                // Optional: Subtle procedural overlay for extra depth
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .drawWithContent {
+                            // Primary glass reflection
                             val reflectionHeight = size.height * 0.46f
                             drawRect(
                                 brush = androidx.compose.ui.graphics.Brush.linearGradient(
                                     colors = listOf(
                                         lcdGlassSheen.copy(alpha = 0.0f),
-                                        lcdGlassSheen.copy(alpha = 0.18f),
-                                        lcdGlassSheen.copy(alpha = 0.28f),
-                                        lcdGlassSheen.copy(alpha = 0.18f),
+                                        lcdGlassSheen.copy(alpha = 0.12f),
+                                        lcdGlassSheen.copy(alpha = 0.22f),
+                                        lcdGlassSheen.copy(alpha = 0.12f),
                                         lcdGlassSheen.copy(alpha = 0.0f)
                                     ),
                                     start = androidx.compose.ui.geometry.Offset(size.width * 0.02f, 0f),
@@ -842,64 +780,61 @@ fun LCDDisplay(text: String, modifier: Modifier = Modifier) {
                                 ),
                                 size = androidx.compose.ui.geometry.Size(size.width, reflectionHeight)
                             )
-
-                            // ── PASS 5: Bottom rim sheen ──
+                            
+                            // Bottom rim sheen
                             drawRect(
                                 brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, lcdGlassSheen.copy(alpha = 0.07f)),
+                                    colors = listOf(Color.Transparent, lcdGlassSheen.copy(alpha = 0.05f)),
                                     startY = size.height * 0.82f, endY = size.height
                                 )
                             )
-
-                            // ── PASS 6: Thin bright highlight line at very top edge ──
-                            drawLine(
-                                color = lcdGlassSheen.copy(alpha = 0.45f),
-                                start = androidx.compose.ui.geometry.Offset(cornerPx, 0f),
-                                end = androidx.compose.ui.geometry.Offset(size.width - cornerPx, 0f),
-                                strokeWidth = 1.2.dp.toPx()
-                            )
                         }
-                    }
-                    .padding(horizontal = 16.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
+                )
+
                 // ── Text rendering: "ink under glass" layered effect ──
-                Box {
-                    // Layer 1: Ink drop-shadow (absorption into substrate)
-                    Text(
-                        text = text,
-                        color = lcdInkShadow,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        letterSpacing = 1.0.sp,
-                        modifier = Modifier.offset(x = 0.8.dp, y = 1.2.dp)
-                    )
-                    // Layer 2: Top-edge ink highlight (glass lensing the ink color upward)
-                    Text(
-                        text = text,
-                        color = lcdInkHighlight,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        letterSpacing = 1.0.sp,
-                        modifier = Modifier.offset(x = 0.dp, y = (-0.7).dp)
-                    )
-                    // Layer 3: Main ink body
-                    Text(
-                        text = text,
-                        color = lcdInkColor,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        letterSpacing = 1.0.sp
-                    )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Box {
+                        // Layer 1: Ink drop-shadow
+                        Text(
+                            text = text,
+                            color = lcdInkShadow,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            letterSpacing = 1.0.sp,
+                            modifier = Modifier.offset(x = 0.8.dp, y = 1.2.dp)
+                        )
+                        // Layer 2: Top-edge ink highlight
+                        Text(
+                            text = text,
+                            color = lcdInkHighlight,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            letterSpacing = 1.0.sp,
+                            modifier = Modifier.offset(x = 0.dp, y = (-0.7).dp)
+                        )
+                        // Layer 3: Main ink body
+                        Text(
+                            text = text,
+                            color = lcdInkColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            letterSpacing = 1.0.sp
+                        )
+                    }
                 }
             }
         }
