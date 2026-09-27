@@ -3,6 +3,8 @@ package com.channingchen.keepasssd
 import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +31,9 @@ class BleUartManager private constructor() {
     private var bluetoothGatt: BluetoothGatt? = null
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
     private var txBuffer = StringBuilder()
+    private val handler = Handler(Looper.getMainLooper())
+    private var shouldReconnect = false
+    private var savedContext: Context? = null
 
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected
@@ -47,6 +52,9 @@ class BleUartManager private constructor() {
             onComplete(true)
             return
         }
+
+        shouldReconnect = true
+        savedContext = context
 
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = manager.adapter ?: return onComplete(false)
@@ -79,6 +87,7 @@ class BleUartManager private constructor() {
                 rxCharacteristic = null
                 bluetoothGatt?.close()
                 bluetoothGatt = null
+                scheduleReconnect()
             }
         }
 
@@ -196,5 +205,29 @@ class BleUartManager private constructor() {
             // WIPE BUFFER
             bytes.fill(0)
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun disconnect() {
+        shouldReconnect = false
+        handler.removeCallbacksAndMessages(null)
+        _isConnected.value = false
+        bluetoothGatt?.close()
+        bluetoothGatt = null
+    }
+
+    private fun scheduleReconnect() {
+        if (!shouldReconnect) return
+        val context = savedContext ?: return
+        handler.postDelayed({
+            if (shouldReconnect && bluetoothGatt == null) {
+                Log.d(TAG, "Auto-reconnect attempt")
+                val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+                val target = manager.adapter?.bondedDevices?.find { it.name == DEVICE_NAME }
+                if (target != null) {
+                    bluetoothGatt = target.connectGatt(context, false, gattCallback)
+                }
+            }
+        }, 2000)
     }
 }

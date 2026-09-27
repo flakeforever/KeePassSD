@@ -1617,6 +1617,8 @@ fun SettingsScreen(viewModel: MainViewModel) {
                         fontSize = 14.sp
                     )
 
+                    Spacer(modifier = Modifier.height(16.dp))
+
             NeumorphicButton(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 onClick = {

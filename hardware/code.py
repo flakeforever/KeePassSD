@@ -171,6 +171,7 @@ while True:
             pass
             
         ui.update(st="SCAN ME", ac="IDLE", ac_col=COLOR_YELLOW)
+        adv_tick = 0
         while not ble.connected:
             # Monitor BOOT button for forced reboot
             if not boot_btn.value:
@@ -182,6 +183,14 @@ while True:
                         microcontroller.reset()
                     time.sleep(0.1)
             
+            # Re-advertise periodically so a one-shot start failure recovers
+            adv_tick += 1
+            if adv_tick >= 10:
+                adv_tick = 0
+                try:
+                    ble.start_advertising(adv)
+                except Exception:
+                    pass
             if (time.monotonic() - last_interaction) > SCREEN_TIMEOUT: ui.sleep()
             time.sleep(0.1)
         
