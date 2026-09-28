@@ -27,7 +27,6 @@ from adafruit_hid.keycode import Keycode
 from adafruit_ble import BLERadio
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 from adafruit_ble.services.nordic import UARTService
-from adafruit_ble.services.standard.hid import HIDService
 
 # --- Metadata & Constants ---
 FW_VERSION = "1.2.0-STABLE"
@@ -153,11 +152,10 @@ boot_btn.direction = digitalio.Direction.INPUT
 boot_btn.pull = digitalio.Pull.UP
 
 uart = UARTService()
-hid = HIDService()
 handler = ProtocolHandler(kpb_kbd, ui, uart)
 
-ble.name = "KPB-Bridge"
-adv = ProvideServicesAdvertisement(hid, uart)
+ble.name = "KPB"
+adv = ProvideServicesAdvertisement(uart)
 adv.complete_name = ble.name
 
 last_interaction = time.monotonic()

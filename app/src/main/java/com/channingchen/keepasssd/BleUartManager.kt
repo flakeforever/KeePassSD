@@ -2,6 +2,7 @@ package com.channingchen.keepasssd
 
 import android.annotation.SuppressLint
 import android.bluetooth.*
+import android.bluetooth.le.*
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -16,7 +17,7 @@ class BleUartManager private constructor() {
         val UART_SERVICE_UUID = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
         val RX_CHAR_UUID = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e") // Write to device
         val TX_CHAR_UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e") // Notify from device
-        const val DEVICE_NAME = "KPB-Bridge"
+        const val DEVICE_NAME = "KPB"
 
         @Volatile
         private var instance: BleUartManager? = null
@@ -34,6 +35,8 @@ class BleUartManager private constructor() {
     private val handler = Handler(Looper.getMainLooper())
     private var shouldReconnect = false
     private var savedContext: Context? = null
+    private var savedAdapter: BluetoothAdapter? = null
+    private var scanCallback: ScanCallback? = null
 
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected
@@ -58,18 +61,19 @@ class BleUartManager private constructor() {
 
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = manager.adapter ?: return onComplete(false)
+        savedAdapter = adapter
 
-        val bondedDevices = adapter.bondedDevices
-        val target = bondedDevices.find { it.name == DEVICE_NAME }
-
-        if (target == null) {
-            Log.e(TAG, "Device $DEVICE_NAME not found in bonded devices")
-            onComplete(false)
+        // Fast path: check bonded devices first
+        val bonded = adapter.bondedDevices?.find { it.name == DEVICE_NAME }
+        if (bonded != null) {
+            Log.d(TAG, "Found $DEVICE_NAME in bonded list, connecting")
+            connectGatt(bonded)
             return
         }
 
-        bluetoothGatt = target.connectGatt(context, false, gattCallback)
-        // Keep callback to return connection status asynchronously or use StateFlow
+        // No bond: scan for the device by name
+        Log.d(TAG, "No bond found, scanning for $DEVICE_NAME")
+        startScan()
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -211,23 +215,60 @@ class BleUartManager private constructor() {
     fun disconnect() {
         shouldReconnect = false
         handler.removeCallbacksAndMessages(null)
+        stopScan()
         _isConnected.value = false
         bluetoothGatt?.close()
         bluetoothGatt = null
     }
 
     private fun scheduleReconnect() {
+        stopScan()
         if (!shouldReconnect) return
-        val context = savedContext ?: return
+        val adapter = savedAdapter ?: return
         handler.postDelayed({
             if (shouldReconnect && bluetoothGatt == null) {
-                Log.d(TAG, "Auto-reconnect attempt")
-                val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-                val target = manager.adapter?.bondedDevices?.find { it.name == DEVICE_NAME }
-                if (target != null) {
-                    bluetoothGatt = target.connectGatt(context, false, gattCallback)
+                val bonded = adapter.bondedDevices?.find { it.name == DEVICE_NAME }
+                if (bonded != null) {
+                    connectGatt(bonded)
+                } else {
+                    startScan()
                 }
             }
         }, 2000)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun connectGatt(device: BluetoothDevice) {
+        if (bluetoothGatt != null) return
+        val context = savedContext ?: return
+        Log.d(TAG, "connectGatt: " + device.name)
+        bluetoothGatt = device.connectGatt(context, false, gattCallback)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startScan() {
+        val adapter = savedAdapter ?: return
+        stopScan()
+        val cb = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                val name = result.device.name
+                Log.d(TAG, "scan: " + name + " rssi=" + result.rssi)
+                if (name == DEVICE_NAME) {
+                    stopScan()
+                    connectGatt(result.device)
+                }
+            }
+
+            override fun onBatchScanResults(results: List<ScanResult>?) {}
+        }
+        scanCallback = cb
+        adapter.bluetoothLeScanner?.startScan(cb)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun stopScan() {
+        val cb = scanCallback ?: return
+        scanCallback = null
+        savedAdapter?.bluetoothLeScanner?.stopScan(cb)
     }
 }

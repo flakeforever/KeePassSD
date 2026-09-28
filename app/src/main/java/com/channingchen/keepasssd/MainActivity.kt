@@ -207,19 +207,23 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.all { it }) {
             viewModel.connectBle(context)
         }
     }
 
     LaunchedEffect(Unit) {
         if (android.os.Build.VERSION.SDK_INT >= 31) {
-            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                permissionLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
-            } else {
+            val needed = listOf(
+                android.Manifest.permission.BLUETOOTH_SCAN,
+                android.Manifest.permission.BLUETOOTH_CONNECT
+            ).filter { context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+            if (needed.isEmpty()) {
                 viewModel.connectBle(context)
+            } else {
+                permissionLauncher.launch(needed.toTypedArray())
             }
         } else {
             viewModel.connectBle(context)
@@ -456,17 +460,18 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
             
             var showInfoDialog by remember { mutableStateOf(false) }
             val deviceInfo by viewModel.deviceInfo.collectAsState()
+            val isBleConnected by viewModel.isBleConnected.collectAsState()
 
             if (showInfoDialog) {
                 DeviceInfoDialog(
                     info = deviceInfo,
+                    isConnected = isBleConnected,
                     onDismiss = { showInfoDialog = false }
                 )
             }
             
             Spacer(modifier = Modifier.weight(1f))
             
-            val isBleConnected by viewModel.isBleConnected.collectAsState()
             val isSending by viewModel.isBleSending.collectAsState()
             
             // Animation for Pulsing Dot
@@ -502,10 +507,14 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                                 showInfoDialog = true
                             } else {
                                 if (android.os.Build.VERSION.SDK_INT >= 31) {
-                                    if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                        permissionLauncher.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
-                                    } else {
+                                    val needed = listOf(
+                                        android.Manifest.permission.BLUETOOTH_SCAN,
+                                        android.Manifest.permission.BLUETOOTH_CONNECT
+                                    ).filter { context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+                                    if (needed.isEmpty()) {
                                         viewModel.connectBle(context)
+                                    } else {
+                                        permissionLauncher.launch(needed.toTypedArray())
                                     }
                                 } else {
                                     viewModel.connectBle(context)
@@ -1711,7 +1720,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-fun DeviceInfoDialog(info: String?, onDismiss: () -> Unit) {
+fun DeviceInfoDialog(info: String?, isConnected: Boolean, onDismiss: () -> Unit) {
     val colors = LocalNeumorphicColors.current
     
     // To avoid dimming, we wrap in a Box that covers the screen in the same stack or use Dialog with transparent properties
@@ -1768,7 +1777,6 @@ fun DeviceInfoDialog(info: String?, onDismiss: () -> Unit) {
                         val parts = info.split("|")
                         val model = parts.getOrNull(0) ?: "Unknown"
                         val version = parts.getOrNull(1) ?: "N/A"
-                        val status = parts.getOrNull(2) ?: "GUEST"
                         
                         // Model layout: Label on left, Value on right (supporting multi-line if needed)
                         Row(
@@ -1791,7 +1799,7 @@ fun DeviceInfoDialog(info: String?, onDismiss: () -> Unit) {
                         Divider(color = colors.darkShadow.copy(alpha = 0.05f), thickness = 1.dp)
                         
                         LightInfoRow("VERSION", "v$version")
-                        LightInfoRow("SAFETY", status)
+                        LightInfoRow("STATUS", if (isConnected) "Connected" else "Not Connected")
                     }
                     
                     Spacer(modifier = Modifier.height(24.dp))
