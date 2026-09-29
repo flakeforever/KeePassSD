@@ -1823,7 +1823,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Version 1.0.7",
+                        "Version 1.1.0",
                         color = colors.textSecondary,
                         fontSize = 14.sp
                     )

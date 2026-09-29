@@ -45,7 +45,7 @@ from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 from adafruit_ble.services.nordic import UARTService
 
 # --- Metadata & Constants ---
-FW_VERSION = "1.3.0-STABLE"
+FW_VERSION = "1.5.0-STABLE"
 MODEL_NAME = "WaveShare ESP32-S3-GEEK"
 TYPING_DELAY = 0.03
 SCREEN_TIMEOUT = 600
