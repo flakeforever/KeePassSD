@@ -16,6 +16,9 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import java.security.SecureRandom
 
+/** A KPB bridge discovered by BLE scan; the address distinguishes identical names. */
+data class KpbDevice(val address: String, val name: String, val rssi: Int)
+
 class BleUartManager private constructor() {
     companion object {
         const val TAG = "BleUartManager"
@@ -27,6 +30,8 @@ class BleUartManager private constructor() {
         val RX_CHAR_UUID = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e") // Write to device
         val TX_CHAR_UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e") // Notify from device
         const val DEVICE_NAME = "KPB"
+        const val PREFS = "kpb_ble"
+        const val KEY_DEFAULT_DEVICE = "default_device"
 
         @Volatile
         private var instance: BleUartManager? = null
@@ -46,6 +51,7 @@ class BleUartManager private constructor() {
     private var savedContext: Context? = null
     private var savedAdapter: BluetoothAdapter? = null
     private var scanCallback: ScanCallback? = null
+    private val scanResults = LinkedHashMap<String, KpbDevice>()
     private var psk: ByteArray? = null
 
     private fun dlog(msg: String) {
@@ -71,6 +77,21 @@ class BleUartManager private constructor() {
     private val _deviceInfo = MutableStateFlow<String?>(null)
     val deviceInfo: StateFlow<String?> = _deviceInfo
 
+    // --- Multi-device support ---
+    private val _scannedDevices = MutableStateFlow<List<KpbDevice>>(emptyList())
+    val scannedDevices: StateFlow<List<KpbDevice>> = _scannedDevices
+
+    private val _scanning = MutableStateFlow(false)
+    val scanning: StateFlow<Boolean> = _scanning
+
+    // Persisted user-chosen bridge (null = never picked -> first-run picker).
+    private val _defaultDeviceAddress = MutableStateFlow<String?>(null)
+    val defaultDeviceAddress: StateFlow<String?> = _defaultDeviceAddress
+
+    // Address of the device the current GATT link belongs to.
+    private val _connectedAddress = MutableStateFlow<String?>(null)
+    val connectedAddress: StateFlow<String?> = _connectedAddress
+
     // Key state reported by the FIRMWARE in its INFO line:
     //   true  = firmware already stores a PSK (state "ENCRYPTED")
     //   false = firmware never paired (state "FACTORY")
@@ -95,23 +116,23 @@ class BleUartManager private constructor() {
         shouldReconnect = true
         savedContext = context
         startupCheckPsk(context)
+        loadDefaultDevice(context)
         dlog("[CONN] connect(): psk in memory=" + pskMasked())
 
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = manager.adapter ?: return onComplete(false)
         savedAdapter = adapter
 
-        // Fast path: check bonded devices first
-        val bonded = adapter.bondedDevices?.find { it.name == DEVICE_NAME }
-        if (bonded != null) {
-            dlog("Found $DEVICE_NAME in bonded list, connecting")
-            connectGatt(bonded)
-            return
+        // Multi-device: a recorded default bridge is contacted directly.
+        val def = _defaultDeviceAddress.value
+        if (def != null) {
+            if (connectToAddress(def)) return
+            Log.w(TAG, "[CONN] default $def unreachable, rescanning")
         }
 
-        // No bond: scan for the device by name
-        dlog("No bond found, scanning for $DEVICE_NAME")
-        startScan()
+        // No default yet: collect ALL nearby KPB bridges so the UI can let
+        // the user pick one (first-run picker). No auto-connect.
+        scanDevices()
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -123,6 +144,9 @@ class BleUartManager private constructor() {
                 gatt.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 dlog("[CONN] GATT disconnected, psk=" + pskMasked())
+                // Stale callback from a previous GATT after a device switch:
+                // the field already points at the new link, do not tear it down.
+                if (bluetoothGatt !== gatt) return
                 _isConnected.value = false
                 _deviceInfo.value = null
                 _deviceHasKey.value = null
@@ -406,12 +430,12 @@ class BleUartManager private constructor() {
        handler.postDelayed({
            if (shouldReconnect && bluetoothGatt == null) {
                 savedContext?.let { loadPsk(it) }
-               val bonded = adapter.bondedDevices?.find { it.name == DEVICE_NAME }
-                if (bonded != null) {
-                    connectGatt(bonded)
-                } else {
-                    startScan()
-                }
+                // Re-attach to the SAME bridge we were talking to, not "any KPB".
+                val addr = _connectedAddress.value ?: _defaultDeviceAddress.value
+                if (addr != null && connectToAddress(addr)) return@postDelayed
+                // Recorded device is gone (powered off / moved away): fall back
+                // to a scan so the UI can offer a replacement selection.
+                scanDevices()
             }
         }, 2000)
     }
@@ -420,34 +444,127 @@ class BleUartManager private constructor() {
     private fun connectGatt(device: BluetoothDevice) {
         if (bluetoothGatt != null) return
         val context = savedContext ?: return
-        dlog("connectGatt: " + device.name)
+        _connectedAddress.value = device.address
+        dlog("connectGatt: " + device.name + " " + device.address)
         bluetoothGatt = device.connectGatt(context, false, gattCallback)
     }
 
+    /** Connect to one specific bridge by MAC address (bonded list first, then remote). */
     @SuppressLint("MissingPermission")
-    private fun startScan() {
-        val adapter = savedAdapter ?: return
+    private fun connectToAddress(address: String): Boolean {
+        val adapter = savedAdapter ?: return false
+        // getRemoteDevice THROWS IllegalArgumentException on a malformed or
+        // cached-stale address; it does not return null. Catch it so a bad
+        // stored default falls back to a rescan instead of crashing.
+        return try {
+            val device = adapter.getRemoteDevice(address)
+            connectGatt(device)
+            true
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "[CONN] invalid address: " + address)
+            false
+        } catch (e: SecurityException) {
+            Log.e(TAG, "[CONN] no permission for " + address, e)
+            false
+        }
+    }
+
+    /**
+     * Discover every KPB bridge in range. Identical advertising names are
+     * distinguished by MAC address. Results accumulate for ~4s, then publish
+     * to [scannedDevices] sorted by signal strength.
+     */
+    @SuppressLint("MissingPermission")
+    fun scanDevices() {
+        val adapter = savedAdapter ?: savedContext?.let {
+            (it.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+        } ?: return
+        savedAdapter = adapter
         stopScan()
+        scanResults.clear()
+        _scannedDevices.value = emptyList()
+        _scanning.value = true
+
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
-                val name = result.device.name
-                dlog("scan: " + name + " rssi=" + result.rssi)
-                if (name == DEVICE_NAME) {
-                    stopScan()
-                    connectGatt(result.device)
+                val dev = result.device
+                val name = dev.name ?: return
+                if (name != DEVICE_NAME) return
+                val addr = dev.address ?: return
+                val prev = scanResults[addr]
+                // Keep the strongest RSSI seen for each address.
+                if (prev == null || result.rssi > prev.rssi) {
+                    scanResults[addr] = KpbDevice(addr, name, result.rssi)
                 }
             }
 
-            override fun onBatchScanResults(results: List<ScanResult>?) {}
+            override fun onBatchScanResults(results: List<ScanResult>?) {
+                results?.forEach { onScanResult(0, it) }
+            }
         }
         scanCallback = cb
-        adapter.bluetoothLeScanner?.startScan(cb)
+        try {
+            adapter.bluetoothLeScanner?.startScan(cb)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "scanDevices: no permission", e)
+            _scanning.value = false
+            return
+        }
+        handler.postDelayed({
+            stopScan()
+            _scannedDevices.value = scanResults.values.sortedByDescending { it.rssi }
+            _scanning.value = false
+            dlog("[SCAN] found " + scanResults.size + " KPB bridge(s)")
+        }, 4000)
+    }
+
+    /**
+     * User picked a bridge: remember it as the default, drop any existing
+     * link, and run the normal connect/key-sync flow against the new device.
+     */
+    @SuppressLint("MissingPermission")
+    fun selectDevice(address: String) {
+        dlog("[DEV] selecting " + address)
+        _defaultDeviceAddress.value = address
+        savedContext?.let { ctx ->
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(KEY_DEFAULT_DEVICE, address).apply()
+        }
+        shouldReconnect = true
+        stopScan()
+        cancelSendTimeout()
+        _isSending.value = false
+        keyIsBeingWritten = false
+        onWriteComplete = null
+        writeOnTimeout = null
+        _isConnected.value = false
+        _deviceInfo.value = null
+        _deviceHasKey.value = null
+        txBuffer.setLength(0)
+        rxCharacteristic = null
+        bluetoothGatt?.close()
+        bluetoothGatt = null
+        _connectedAddress.value = address
+        handler.postDelayed({
+            if (!connectToAddress(address)) {
+                Log.w(TAG, "[DEV] cannot reach $address, rescanning")
+                scanDevices()
+            }
+        }, 300)
+    }
+
+    private fun loadDefaultDevice(ctx: Context) {
+        if (_defaultDeviceAddress.value != null) return
+        _defaultDeviceAddress.value =
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_DEFAULT_DEVICE, null)
     }
 
     @SuppressLint("MissingPermission")
     private fun stopScan() {
         val cb = scanCallback ?: return
         scanCallback = null
+        _scanning.value = false
         savedAdapter?.bluetoothLeScanner?.stopScan(cb)
     }
 
@@ -488,14 +605,23 @@ class BleUartManager private constructor() {
         _keyMismatch.value = false
     }
 
-    /** Generate a fresh 128-bit PSK and push it to the device in plaintext.
-     *  The firmware accepts KEY: in BOTH states (factory and paired), and the
-     *  key is persisted ONLY after the device ACKs, so memory/storage/device
-     *  never diverge on a failed pairing.
-     *  Callback receives the hex string on success, null on failure. */
+    /**
+     * Push the app's FIXED PSK to the device in plaintext.
+     * The app holds exactly ONE key, generated once at first run
+     * (startupCheckPsk) and reused for every bridge it pairs with.
+     * This only (re)provisions that same key onto a new/changed device;
+     * it never rotates the app key. The firmware accepts KEY: in BOTH
+     * states (factory and paired), and the key is persisted ONLY after
+     * the device ACKs, so memory/storage/device never diverge on failure.
+     * Callback receives the hex string on success, null on failure.
+     */
     fun generatePsk(onComplete: (String?) -> Unit) {
-        val key = ByteArray(16)
-        SecureRandom().nextBytes(key)
+        // Fixed key: reuse the stored one; generate only if truly absent.
+        var key = psk
+        if (key == null) {
+            key = ByteArray(16)
+            SecureRandom().nextBytes(key)
+        }
         val hex = key.joinToString("") { String.format("%02x", it) }
         dlog("[PAIR] generatePsk: sending KEY in plaintext, hex len=" + hex.length)
         // Clear any in-flight write (e.g. a racing GET:INFO) so the KEY write

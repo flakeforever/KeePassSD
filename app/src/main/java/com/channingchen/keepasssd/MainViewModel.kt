@@ -106,6 +106,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val deviceHasKey = bleManager.deviceHasKey
     val keyMismatch = bleManager.keyMismatch
 
+    /** All KPB bridges found by the last scan, strongest signal first. */
+    val scannedDevices = bleManager.scannedDevices
+    val isScanning = bleManager.scanning
+    /** Persisted user-chosen bridge address (null = first run, never picked). */
+    val defaultDeviceAddress = bleManager.defaultDeviceAddress
+    /** Address of the bridge behind the current GATT link. */
+    val connectedAddress = bleManager.connectedAddress
+
     private val _canUndo = MutableStateFlow(false)
     val canUndo: StateFlow<Boolean> = _canUndo
 
@@ -364,6 +372,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connectBle(context: Context) {
         bleManager.connect(context)
+    }
+
+    /** Refresh the list of nearby KPB bridges (picker / switcher). */
+    fun scanBridges() {
+        bleManager.scanDevices()
+    }
+
+    /** Pick or switch the bridge: records it as default and reconnects to it. */
+    fun selectBridge(address: String) {
+        bleManager.selectDevice(address)
     }
 
     /**

@@ -468,6 +468,19 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
             val hasPsk by viewModel.hasPsk.collectAsState()
             val deviceHasKey by viewModel.deviceHasKey.collectAsState()
             val keyMismatch by viewModel.keyMismatch.collectAsState()
+            val scannedDevices by viewModel.scannedDevices.collectAsState()
+            val isScanning by viewModel.isScanning.collectAsState()
+            val defaultDevice by viewModel.defaultDeviceAddress.collectAsState()
+            val connectedAddress by viewModel.connectedAddress.collectAsState()
+
+            // First-run bridge picker: shown once when nearby KPB devices were
+            // found and the user has never chosen a default bridge.
+            var showDevicePicker by remember { mutableStateOf(false) }
+            LaunchedEffect(scannedDevices, defaultDevice) {
+                if (defaultDevice == null && scannedDevices.isNotEmpty()) {
+                    showDevicePicker = true
+                }
+            }
 
             // Pairing result dialog state: null = closed, "OK:<hex>" = success, "FAIL" = no response
             var pairResult by remember { mutableStateOf<String?>(null) }
@@ -481,6 +494,16 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                     isConnected = isBleConnected,
                     hasPsk = hasPsk,
                     deviceHasKey = deviceHasKey,
+                    currentAddress = connectedAddress ?: defaultDevice,
+                    devices = scannedDevices,
+                    scanning = isScanning,
+                    onSelectDevice = { addr ->
+                        // Switching bridges: disconnect the old link and run
+                        // the full connect + key-sync flow against the new one.
+                        showInfoDialog = false
+                        viewModel.selectBridge(addr)
+                    },
+                    onRescan = { viewModel.scanBridges() },
                     onPair = { viewModel.pairWithDevice { hex ->
                         showPairResult(hex)
                     } },
@@ -571,6 +594,22 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                         }
                     }
                 }
+            }
+
+            // First-run / no-default bridge picker: lists every KPB found in
+            // range, preselects the strongest, and records the choice as the
+            // default device once confirmed.
+            if (showDevicePicker) {
+                DevicePickerDialog(
+                    devices = scannedDevices,
+                    scanning = isScanning,
+                    onConfirm = { addr ->
+                        showDevicePicker = false
+                        viewModel.selectBridge(addr)
+                    },
+                    onRescan = { viewModel.scanBridges() },
+                    onDismiss = { showDevicePicker = false }
+                )
             }
 
             // Yellow warning banner when a send timed out (likely key mismatch)
@@ -1846,16 +1885,186 @@ fun SettingsScreen(viewModel: MainViewModel) {
 }
 
 @Composable
+fun DevicePickerDialog(
+    devices: List<KpbDevice>,
+    scanning: Boolean,
+    onConfirm: (String) -> Unit,
+    onRescan: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = LocalNeumorphicColors.current
+    var selected by remember { mutableStateOf<String?>(null) }
+    // Default-select the strongest (first) device even when only one exists.
+    val effective = selected ?: devices.firstOrNull()?.address
+    LaunchedEffect(devices) {
+        if (selected != null && devices.none { it.address == selected }) selected = null
+    }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false
+        )
+    ) {
+        // Transparent full-screen layer, same as the other dialogs (no dimming)
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(320.dp)
+                    .padding(24.dp)
+                    .background(color = colors.background, shape = RoundedCornerShape(4.dp))
+                    .border(width = 2.dp, color = colors.darkShadow.copy(alpha = 0.8f), shape = RoundedCornerShape(4.dp))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "SELECT BRIDGE",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = colors.textPrimary,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "Choose the KPB device to connect. It becomes the default bridge.",
+                        color = colors.textSecondary,
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(20.dp))
+
+                    if (scanning && devices.isEmpty()) {
+                        // Recessed well while scanning
+                        NeumorphicCard(
+                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                            cornerRadius = 12.dp,
+                            isPressed = true
+                        ) {
+                            Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Text("SCANNING FOR DEVICES...", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else if (devices.isEmpty()) {
+                        NeumorphicCard(
+                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                            cornerRadius = 12.dp,
+                            isPressed = true
+                        ) {
+                            Text("No KPB devices found nearby.", color = colors.textSecondary, fontSize = 11.sp)
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            devices.forEach { dev ->
+                                val isSel = dev.address == effective
+                                // Selected row sits recessed, unselected rows stay raised.
+                                NeumorphicCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    cornerRadius = 12.dp,
+                                    innerPadding = 0.dp,
+                                    isPressed = isSel
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { selected = dev.address }
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .neumorphic(
+                                                    backgroundColor = colors.background,
+                                                    lightShadowColor = colors.lightShadow,
+                                                    darkShadowColor = colors.darkShadow,
+                                                    cornerRadius = 9.dp,
+                                                    elevation = 3.dp,
+                                                    isPressed = true
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSel) Box(Modifier.size(9.dp).background(colors.accent, shape = CircleShape))
+                                        }
+                                        Spacer(Modifier.width(14.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(dev.address, color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                            Spacer(Modifier.height(3.dp))
+                                            Text(dev.name + "   " + dev.rssi + " dBm", color = colors.textSecondary, fontSize = 9.sp)
+                                        }
+                                        if (isSel) {
+                                            Text("SELECTED", color = colors.accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        NeumorphicButton(
+                            onClick = onRescan,
+                            enabled = !scanning,
+                            cornerRadius = 12.dp,
+                            innerPadding = 0.dp,
+                            modifier = Modifier.weight(1f).height(44.dp)
+                        ) {
+                            Text(if (scanning) "SCANNING..." else "RESCAN", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        NeumorphicButton(
+                            onClick = { effective?.let { onConfirm(it) } },
+                            enabled = effective != null,
+                            cornerRadius = 12.dp,
+                            innerPadding = 0.dp,
+                            modifier = Modifier.weight(1f).height(44.dp)
+                        ) {
+                            Text("CONFIRM", color = if (effective != null) colors.accent else colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun DeviceInfoDialog(
     info: String?,
     isConnected: Boolean,
     hasPsk: Boolean,
     deviceHasKey: Boolean?,
+    currentAddress: String?,
+    devices: List<KpbDevice>,
+    scanning: Boolean,
+    onSelectDevice: (String) -> Unit,
+    onRescan: () -> Unit,
     onPair: () -> Unit,
     onWipe: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = LocalNeumorphicColors.current
+    var devicesExpanded by remember { mutableStateOf(false) }
+    // Show scanned devices plus the current one (a scan may not have run yet).
+    val deviceList = remember(devices, currentAddress) {
+        val merged = devices.toMutableList()
+        if (currentAddress != null && merged.none { it.address == currentAddress }) {
+            merged.add(0, KpbDevice(currentAddress, "KPB", 0))
+        }
+        merged
+    }
     
     // To avoid dimming, we wrap in a Box that covers the screen in the same stack or use Dialog with transparent properties
     androidx.compose.ui.window.Dialog(
@@ -1901,6 +2110,117 @@ fun DeviceInfoDialog(
                     
                     Spacer(modifier = Modifier.height(20.dp))
                     
+                    // Bridge switcher (combo box) at the top: the current
+                    // bridge is the headline; expand to pick another KPB.
+                    NeumorphicCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        cornerRadius = 12.dp,
+                        innerPadding = 0.dp,
+                        isPressed = devicesExpanded
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { devicesExpanded = !devicesExpanded }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("BRIDGE", color = colors.textSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    currentAddress ?: "not selected",
+                                    color = colors.textPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Text(
+                                text = if (devicesExpanded) "▲" else "▼",
+                                color = colors.textSecondary,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                    if (devicesExpanded) {
+                        Spacer(Modifier.height(10.dp))
+                        Column(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (scanning) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("SCANNING...", color = colors.textSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (deviceList.isEmpty() && !scanning) {
+                                Text(
+                                    "No KPB bridges found",
+                                    color = colors.textSecondary,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                )
+                            }
+                            deviceList.forEach { dev ->
+                                val isCurrent = dev.address == currentAddress
+                                NeumorphicCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    cornerRadius = 12.dp,
+                                    innerPadding = 0.dp,
+                                    isPressed = isCurrent
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable(enabled = !isCurrent) {
+                                                devicesExpanded = false
+                                                onSelectDevice(dev.address)
+                                            }
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                dev.address,
+                                                color = colors.textPrimary,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                            Spacer(Modifier.height(3.dp))
+                                            Text(
+                                                dev.name + "   " + dev.rssi + " dBm",
+                                                color = colors.textSecondary,
+                                                fontSize = 9.sp
+                                            )
+                                        }
+                                        if (isCurrent) {
+                                            Text("CURRENT", color = colors.accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                            NeumorphicButton(
+                                onClick = onRescan,
+                                enabled = !scanning,
+                                cornerRadius = 12.dp,
+                                innerPadding = 0.dp,
+                                modifier = Modifier.fillMaxWidth().height(40.dp)
+                            ) {
+                                Text(if (scanning) "SCANNING..." else "RESCAN", color = colors.textSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.height(20.dp))
+                    }
                     Divider(color = colors.darkShadow.copy(alpha = 0.15f), thickness = 1.dp)
                     
                     Spacer(modifier = Modifier.height(20.dp))
@@ -1937,14 +2257,6 @@ fun DeviceInfoDialog(
                         LightInfoRow(
                             "APP KEY",
                             if (hasPsk) "Stored" else "None"
-                        )
-                        LightInfoRow(
-                            "DEVICE KEY",
-                            when (deviceHasKey) {
-                                true -> "Stored (encrypted link)"
-                                false -> "None (FACTORY)"
-                                null -> "Unknown"
-                            }
                         )
                         LightInfoRow(
                             "ENCRYPTION",
