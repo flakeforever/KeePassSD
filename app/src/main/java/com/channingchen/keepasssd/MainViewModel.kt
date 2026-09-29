@@ -101,6 +101,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isBleConnected = bleManager.isConnected
     val isBleSending = bleManager.isSending
     val deviceInfo = bleManager.deviceInfo
+    val hasPsk = bleManager.hasPsk
+    /** Firmware-reported key state from INFO: true=has key, false=FACTORY, null=unknown */
+    val deviceHasKey = bleManager.deviceHasKey
+    val keyMismatch = bleManager.keyMismatch
 
     private val _canUndo = MutableStateFlow(false)
     val canUndo: StateFlow<Boolean> = _canUndo
@@ -362,6 +366,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.connect(context)
     }
 
+    /**
+     * Establish PSK with the device (factory state only).
+     * Callback receives the PSK hex on success, null on failure.
+     */
+    fun pairWithDevice(onComplete: (String?) -> Unit) {
+        bleManager.generatePsk(onComplete)
+    }
+
+    /** Clear the locally stored PSK. Device side must be wiped separately (10s button). */
+    fun wipePsk() {
+        bleManager.wipePsk()
+    }
+
+    fun startupCheckPsk(context: android.content.Context) {
+        bleManager.startupCheckPsk(context)
+    }
+
+    fun clearKeyMismatch() {
+        bleManager.clearKeyMismatch()
+    }
     fun sendUsername(item: VaultItem) {
         bleManager.sendString("TXT:${item.username}\n")
         _canUndo.value = true

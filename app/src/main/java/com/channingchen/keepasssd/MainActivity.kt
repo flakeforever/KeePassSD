@@ -34,6 +34,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -88,6 +90,8 @@ class MainActivity : ComponentActivity() {
                 val showSettings by viewModel.showSettings.collectAsState()
                 
                 val context = LocalContext.current
+                // App startup: read/generate PSK immediately, no BLE needed.
+                viewModel.startupCheckPsk(context)
                 
                 var currentScreen by remember { mutableStateOf("Unlock") }
 
@@ -461,13 +465,135 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
             var showInfoDialog by remember { mutableStateOf(false) }
             val deviceInfo by viewModel.deviceInfo.collectAsState()
             val isBleConnected by viewModel.isBleConnected.collectAsState()
+            val hasPsk by viewModel.hasPsk.collectAsState()
+            val deviceHasKey by viewModel.deviceHasKey.collectAsState()
+            val keyMismatch by viewModel.keyMismatch.collectAsState()
+
+            // Pairing result dialog state: null = closed, "OK:<hex>" = success, "FAIL" = no response
+            var pairResult by remember { mutableStateOf<String?>(null) }
+            fun showPairResult(hex: String?) {
+                pairResult = if (hex != null) "OK:$hex" else "FAIL"
+            }
 
             if (showInfoDialog) {
                 DeviceInfoDialog(
                     info = deviceInfo,
                     isConnected = isBleConnected,
+                    hasPsk = hasPsk,
+                    deviceHasKey = deviceHasKey,
+                    onPair = { viewModel.pairWithDevice { hex ->
+                        showPairResult(hex)
+                    } },
+                    onWipe = {
+                        viewModel.wipePsk()
+                        showInfoDialog = false
+                    },
                     onDismiss = { showInfoDialog = false }
                 )
+            }
+
+            // Pairing result dialog: shows the PSK hex so the user can record it
+            if (pairResult != null) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { pairResult = null },
+                    properties = androidx.compose.ui.window.DialogProperties(
+                        usePlatformDefaultWidth = false,
+                        dismissOnBackPress = true,
+                        dismissOnClickOutside = false
+                    )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(onClick = { pairResult = null }, indication = null, interactionSource = remember { MutableInteractionSource() }),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(320.dp)
+                                .padding(24.dp)
+                                .background(
+                                    color = colors.background,
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .border(
+                                    width = 2.dp,
+                                    color = colors.darkShadow.copy(alpha = 0.8f),
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                val isFail = pairResult == "FAIL"
+                                Text(
+                                    text = if (isFail) "PAIRING FAILED" else "PAIRING COMPLETE",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (isFail) Color(0xFFFFC107) else colors.textPrimary,
+                                    letterSpacing = 1.sp
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                if (isFail) {
+                                    Text(
+                                        text = "Device did not respond. It already has a key stored. Wipe the device key first (hold button 10s) and try again.",
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                } else {
+                                    Text(
+                                        text = "This is the device key. Keep it safe - it is shown only once.",
+                                        color = colors.textSecondary,
+                                        fontSize = 11.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = pairResult!!.removePrefix("OK:"),
+                                        color = colors.accent,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(24.dp))
+                                Button(
+                                    onClick = { pairResult = null },
+                                    colors = ButtonDefaults.buttonColors(containerColor = colors.textPrimary),
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                                ) {
+                                    Text("CLOSE", color = colors.background, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Yellow warning banner when a send timed out (likely key mismatch)
+            if (keyMismatch && isBleConnected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .background(
+                            color = Color(0xFFFFC107).copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                        .clickable { viewModel.clearKeyMismatch() }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "NO RESPONSE - POSSIBLE KEY MISMATCH. Open device info to re-pair.",
+                        color = Color(0xFFFFC107),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
             }
             
             Spacer(modifier = Modifier.weight(1f))
@@ -1720,7 +1846,15 @@ fun SettingsScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-fun DeviceInfoDialog(info: String?, isConnected: Boolean, onDismiss: () -> Unit) {
+fun DeviceInfoDialog(
+    info: String?,
+    isConnected: Boolean,
+    hasPsk: Boolean,
+    deviceHasKey: Boolean?,
+    onPair: () -> Unit,
+    onWipe: () -> Unit,
+    onDismiss: () -> Unit
+) {
     val colors = LocalNeumorphicColors.current
     
     // To avoid dimming, we wrap in a Box that covers the screen in the same stack or use Dialog with transparent properties
@@ -1799,7 +1933,58 @@ fun DeviceInfoDialog(info: String?, isConnected: Boolean, onDismiss: () -> Unit)
                         Divider(color = colors.darkShadow.copy(alpha = 0.05f), thickness = 1.dp)
                         
                         LightInfoRow("VERSION", "v$version")
-                        LightInfoRow("STATUS", if (isConnected) "Connected" else "Not Connected")
+                        LightInfoRow("LINK", if (isConnected) "Connected" else "Not Connected")
+                        LightInfoRow(
+                            "APP KEY",
+                            if (hasPsk) "Stored" else "None"
+                        )
+                        LightInfoRow(
+                            "DEVICE KEY",
+                            when (deviceHasKey) {
+                                true -> "Stored (encrypted link)"
+                                false -> "None (FACTORY)"
+                                null -> "Unknown"
+                            }
+                        )
+                        LightInfoRow(
+                            "ENCRYPTION",
+                            if (hasPsk && deviceHasKey == true) "AES-128-GCM"
+                            else if (hasPsk && deviceHasKey == false) "Pending key push"
+                            else "None (Factory)"
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Pair / Wipe actions (only meaningful when connected)
+                    if (isConnected) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = onPair,
+                                enabled = !hasPsk,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.accent.copy(alpha = if (hasPsk) 0.4f else 1f)
+                                ),
+                                shape = RoundedCornerShape(4.dp),
+                                modifier = Modifier.weight(1f).height(36.dp)
+                            ) {
+                                Text("PAIR KEY", color = colors.background, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = onWipe,
+                                enabled = hasPsk,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.darkShadow.copy(alpha = if (hasPsk) 0.6f else 0.3f)
+                                ),
+                                shape = RoundedCornerShape(4.dp),
+                                modifier = Modifier.weight(1f).height(36.dp)
+                            ) {
+                                Text("WIPE KEY", color = colors.background, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        }
                     }
                     
                     Spacer(modifier = Modifier.height(24.dp))
