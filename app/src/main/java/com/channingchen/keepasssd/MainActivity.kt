@@ -2159,10 +2159,6 @@ fun DeviceInfoDialog(
                         LightInfoRow("VERSION", "v$version")
                         LightInfoRow("LINK", if (isConnected) "Connected" else "Not Connected")
                         LightInfoRow(
-                            "APP KEY",
-                            if (hasPsk) "Stored" else "None"
-                        )
-                        LightInfoRow(
                             "ENCRYPTION",
                             if (hasPsk && deviceHasKey == true) "AES-128-GCM"
                             else if (hasPsk && deviceHasKey == false) "Pending key push"
