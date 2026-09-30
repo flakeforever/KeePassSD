@@ -384,19 +384,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.selectDevice(address)
     }
 
-    /**
-     * Establish PSK with the device (factory state only).
-     * Callback receives the PSK hex on success, null on failure.
-     */
-    fun pairWithDevice(onComplete: (String?) -> Unit) {
-        bleManager.generatePsk(onComplete)
-    }
-
-    /** Clear the locally stored PSK. Device side must be wiped separately (10s button). */
-    fun wipePsk() {
-        bleManager.wipePsk()
-    }
-
     fun startupCheckPsk(context: android.content.Context) {
         bleManager.startupCheckPsk(context)
     }

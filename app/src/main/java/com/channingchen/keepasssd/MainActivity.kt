@@ -482,12 +482,6 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                 }
             }
 
-            // Pairing result dialog state: null = closed, "OK:<hex>" = success, "FAIL" = no response
-            var pairResult by remember { mutableStateOf<String?>(null) }
-            fun showPairResult(hex: String?) {
-                pairResult = if (hex != null) "OK:$hex" else "FAIL"
-            }
-
             if (showInfoDialog) {
                 DeviceInfoDialog(
                     info = deviceInfo,
@@ -504,96 +498,8 @@ fun MainScreen(viewModel: MainViewModel, onNavigateToUnlock: () -> Unit) {
                         viewModel.selectBridge(addr)
                     },
                     onRescan = { viewModel.scanBridges() },
-                    onPair = { viewModel.pairWithDevice { hex ->
-                        showPairResult(hex)
-                    } },
-                    onWipe = {
-                        viewModel.wipePsk()
-                        showInfoDialog = false
-                    },
                     onDismiss = { showInfoDialog = false }
                 )
-            }
-
-            // Pairing result dialog: shows the PSK hex so the user can record it
-            if (pairResult != null) {
-                androidx.compose.ui.window.Dialog(
-                    onDismissRequest = { pairResult = null },
-                    properties = androidx.compose.ui.window.DialogProperties(
-                        usePlatformDefaultWidth = false,
-                        dismissOnBackPress = true,
-                        dismissOnClickOutside = false
-                    )
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(onClick = { pairResult = null }, indication = null, interactionSource = remember { MutableInteractionSource() }),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(320.dp)
-                                .padding(24.dp)
-                                .background(
-                                    color = colors.background,
-                                    shape = RoundedCornerShape(4.dp)
-                                )
-                                .border(
-                                    width = 2.dp,
-                                    color = colors.darkShadow.copy(alpha = 0.8f),
-                                    shape = RoundedCornerShape(4.dp)
-                                )
-                                .padding(24.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                val isFail = pairResult == "FAIL"
-                                Text(
-                                    text = if (isFail) "PAIRING FAILED" else "PAIRING COMPLETE",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (isFail) Color(0xFFFFC107) else colors.textPrimary,
-                                    letterSpacing = 1.sp
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                if (isFail) {
-                                    Text(
-                                        text = "Device did not respond. It already has a key stored. Wipe the device key first (hold button 10s) and try again.",
-                                        color = colors.textSecondary,
-                                        fontSize = 11.sp,
-                                        textAlign = TextAlign.Center
-                                    )
-                                } else {
-                                    Text(
-                                        text = "This is the device key. Keep it safe - it is shown only once.",
-                                        color = colors.textSecondary,
-                                        fontSize = 11.sp,
-                                        textAlign = TextAlign.Center
-                                    )
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text(
-                                        text = pairResult!!.removePrefix("OK:"),
-                                        color = colors.accent,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(24.dp))
-                                Button(
-                                    onClick = { pairResult = null },
-                                    colors = ButtonDefaults.buttonColors(containerColor = colors.textPrimary),
-                                    shape = RoundedCornerShape(4.dp),
-                                    modifier = Modifier.fillMaxWidth().height(42.dp)
-                                ) {
-                                    Text("CLOSE", color = colors.background, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
             // First-run / no-default bridge picker: lists every KPB found in
@@ -2051,8 +1957,6 @@ fun DeviceInfoDialog(
     scanning: Boolean,
     onSelectDevice: (String) -> Unit,
     onRescan: () -> Unit,
-    onPair: () -> Unit,
-    onWipe: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = LocalNeumorphicColors.current
@@ -2268,39 +2172,6 @@ fun DeviceInfoDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Pair / Wipe actions (only meaningful when connected)
-                    if (isConnected) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Button(
-                                onClick = onPair,
-                                enabled = !hasPsk,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = colors.accent.copy(alpha = if (hasPsk) 0.4f else 1f)
-                                ),
-                                shape = RoundedCornerShape(4.dp),
-                                modifier = Modifier.weight(1f).height(36.dp)
-                            ) {
-                                Text("PAIR KEY", color = colors.background, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                            }
-                            Button(
-                                onClick = onWipe,
-                                enabled = hasPsk,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = colors.darkShadow.copy(alpha = if (hasPsk) 0.6f else 0.3f)
-                                ),
-                                shape = RoundedCornerShape(4.dp),
-                                modifier = Modifier.weight(1f).height(36.dp)
-                            ) {
-                                Text("WIPE KEY", color = colors.background, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                            }
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(24.dp))
-                    
                     Button(
                         onClick = onDismiss,
                         colors = ButtonDefaults.buttonColors(containerColor = colors.textPrimary),
