@@ -1805,6 +1805,9 @@ fun DevicePickerDialog(
     LaunchedEffect(devices) {
         if (selected != null && devices.none { it.address == selected }) selected = null
     }
+    // Never taller than the screen: the whole card scrolls instead of
+    // pushing the buttons off the bottom edge.
+    val maxCardH = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.85f).dp
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(
@@ -1821,13 +1824,16 @@ fun DevicePickerDialog(
             Box(
                 modifier = Modifier
                     .width(320.dp)
-                    .padding(24.dp)
+                    .heightIn(max = maxCardH)
+                    .padding(16.dp) // shadow margin
                     .background(color = colors.background, shape = RoundedCornerShape(4.dp))
                     .border(width = 2.dp, color = colors.darkShadow.copy(alpha = 0.8f), shape = RoundedCornerShape(4.dp))
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
+                    .padding(20.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text(
                         text = "SELECT BRIDGE",
                         fontSize = 14.sp,
@@ -1835,40 +1841,36 @@ fun DevicePickerDialog(
                         color = colors.textPrimary,
                         letterSpacing = 1.sp
                     )
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         "Choose the KPB device to connect. It becomes the default bridge.",
                         color = colors.textSecondary,
                         fontSize = 10.sp,
                         textAlign = TextAlign.Center
                     )
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(16.dp))
 
-                    if (scanning && devices.isEmpty()) {
-                        // Recessed well while scanning
+                    if (devices.isEmpty()) {
+                        // Recessed well while scanning / empty
                         NeumorphicCard(
-                            modifier = Modifier.fillMaxWidth().height(64.dp),
+                            modifier = Modifier.fillMaxWidth().height(56.dp),
                             cornerRadius = 12.dp,
                             isPressed = true
                         ) {
-                            Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(12.dp))
-                                Text("SCANNING FOR DEVICES...", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            if (scanning) {
+                                Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(10.dp))
+                                    Text("SCANNING...", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text("No KPB devices found nearby.", color = colors.textSecondary, fontSize = 11.sp)
                             }
-                        }
-                    } else if (devices.isEmpty()) {
-                        NeumorphicCard(
-                            modifier = Modifier.fillMaxWidth().height(64.dp),
-                            cornerRadius = 12.dp,
-                            isPressed = true
-                        ) {
-                            Text("No KPB devices found nearby.", color = colors.textSecondary, fontSize = 11.sp)
                         }
                     } else {
                         Column(
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             devices.forEach { dev ->
                                 val isSel = dev.address == effective
@@ -1883,50 +1885,52 @@ fun DevicePickerDialog(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clickable { selected = dev.address }
-                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(18.dp)
+                                                .size(16.dp)
                                                 .neumorphic(
                                                     backgroundColor = colors.background,
                                                     lightShadowColor = colors.lightShadow,
                                                     darkShadowColor = colors.darkShadow,
-                                                    cornerRadius = 9.dp,
+                                                    cornerRadius = 8.dp,
                                                     elevation = 3.dp,
                                                     isPressed = true
                                                 ),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            if (isSel) Box(Modifier.size(9.dp).background(colors.accent, shape = CircleShape))
+                                            if (isSel) Box(Modifier.size(8.dp).background(colors.accent, shape = CircleShape))
                                         }
-                                        Spacer(Modifier.width(14.dp))
+                                        Spacer(Modifier.width(12.dp))
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(dev.address, color = colors.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                            Spacer(Modifier.height(3.dp))
-                                            Text(dev.name + "   " + dev.rssi + " dBm", color = colors.textSecondary, fontSize = 9.sp)
+                                            Text(dev.name, color = colors.textSecondary, fontSize = 9.sp)
                                         }
-                                        if (isSel) {
-                                            Text("SELECTED", color = colors.accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                        }
+                                        Text(
+                                            dev.rssi.toString() + " dBm",
+                                            color = if (isSel) colors.accent else colors.textSecondary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                             }
                         }
                     }
 
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(16.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         NeumorphicButton(
                             onClick = onRescan,
                             enabled = !scanning,
                             cornerRadius = 12.dp,
                             innerPadding = 0.dp,
-                            modifier = Modifier.weight(1f).height(44.dp)
+                            modifier = Modifier.weight(1f).height(42.dp)
                         ) {
                             Text(if (scanning) "SCANNING..." else "RESCAN", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
@@ -1935,7 +1939,7 @@ fun DevicePickerDialog(
                             enabled = effective != null,
                             cornerRadius = 12.dp,
                             innerPadding = 0.dp,
-                            modifier = Modifier.weight(1f).height(44.dp)
+                            modifier = Modifier.weight(1f).height(42.dp)
                         ) {
                             Text("CONFIRM", color = if (effective != null) colors.accent else colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
@@ -1969,8 +1973,10 @@ fun DeviceInfoDialog(
         }
         merged
     }
-    
-    // To avoid dimming, we wrap in a Box that covers the screen in the same stack or use Dialog with transparent properties
+    // Cap the card to the screen height; the content scrolls instead of
+    // clipping the RESCAN / CLOSE buttons.
+    val maxCardH = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.85f).dp
+
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(
@@ -1979,20 +1985,20 @@ fun DeviceInfoDialog(
             dismissOnClickOutside = true
         )
     ) {
-        // Full screen transparent container to cancel default dimming (or as much as possible via properties)
+        // Full screen transparent container to cancel default dimming
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .clickable(onClick = onDismiss, indication = null, interactionSource = remember { MutableInteractionSource() }),
             contentAlignment = Alignment.Center
         ) {
-            // THE FLAT MINIMAL CARD
             Box(
                 modifier = Modifier
                     .width(320.dp)
-                    .padding(24.dp)
+                    .heightIn(max = maxCardH)
+                    .padding(16.dp) // shadow margin
                     .background(
-                        color = colors.background, // Match overall tone
+                        color = colors.background,
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
                     )
                     .border(
@@ -2000,10 +2006,13 @@ fun DeviceInfoDialog(
                         color = colors.darkShadow.copy(alpha = 0.8f),
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
                     )
-                    .padding(24.dp),
+                    .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text(
                         text = "BRIDGE INFO",
                         fontSize = 14.sp,
@@ -2011,9 +2020,9 @@ fun DeviceInfoDialog(
                         color = colors.textPrimary,
                         letterSpacing = 1.sp
                     )
-                    
-                    Spacer(modifier = Modifier.height(20.dp))
-                    
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
                     // Bridge switcher (combo box) at the top: the current
                     // bridge is the headline; expand to pick another KPB.
                     NeumorphicCard(
@@ -2026,13 +2035,13 @@ fun DeviceInfoDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { devicesExpanded = !devicesExpanded }
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("BRIDGE", color = colors.textSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                                Spacer(Modifier.height(4.dp))
+                                Spacer(Modifier.height(3.dp))
                                 Text(
                                     currentAddress ?: "not selected",
                                     color = colors.textPrimary,
@@ -2042,21 +2051,21 @@ fun DeviceInfoDialog(
                                 )
                             }
                             Text(
-                                text = if (devicesExpanded) "▲" else "▼",
+                                text = if (devicesExpanded) "\u25B2" else "\u25BC",
                                 color = colors.textSecondary,
                                 fontSize = 10.sp
                             )
                         }
                     }
                     if (devicesExpanded) {
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(8.dp))
                         Column(
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             if (scanning) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -2070,7 +2079,7 @@ fun DeviceInfoDialog(
                                     "No KPB bridges found",
                                     color = colors.textSecondary,
                                     fontSize = 10.sp,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                                 )
                             }
                             deviceList.forEach { dev ->
@@ -2088,8 +2097,7 @@ fun DeviceInfoDialog(
                                                 devicesExpanded = false
                                                 onSelectDevice(dev.address)
                                             }
-                                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
@@ -2100,15 +2108,23 @@ fun DeviceInfoDialog(
                                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                                                 fontFamily = FontFamily.Monospace
                                             )
-                                            Spacer(Modifier.height(3.dp))
                                             Text(
-                                                dev.name + "   " + dev.rssi + " dBm",
+                                                dev.name,
                                                 color = colors.textSecondary,
                                                 fontSize = 9.sp
                                             )
                                         }
-                                        if (isCurrent) {
-                                            Text("CURRENT", color = colors.accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(
+                                                dev.rssi.toString() + " dBm",
+                                                color = colors.textSecondary,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            if (isCurrent) {
+                                                Text("CURRENT", color = colors.accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                     }
                                 }
@@ -2118,44 +2134,44 @@ fun DeviceInfoDialog(
                                 enabled = !scanning,
                                 cornerRadius = 12.dp,
                                 innerPadding = 0.dp,
-                                modifier = Modifier.fillMaxWidth().height(40.dp)
+                                modifier = Modifier.fillMaxWidth().height(38.dp)
                             ) {
                                 Text(if (scanning) "SCANNING..." else "RESCAN", color = colors.textSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(14.dp))
                     }
                     Divider(color = colors.darkShadow.copy(alpha = 0.15f), thickness = 1.dp)
-                    
-                    Spacer(modifier = Modifier.height(20.dp))
-                    
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
                     if (info == null) {
                         CircularProgressIndicator(color = colors.accent, modifier = Modifier.size(24.dp))
                     } else {
                         val parts = info.split("|")
                         val model = parts.getOrNull(0) ?: "Unknown"
                         val version = parts.getOrNull(1) ?: "N/A"
-                        
+
                         // Model layout: Label on left, Value on right (supporting multi-line if needed)
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.Top
                         ) {
                             Text("MODEL", color = colors.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.width(16.dp))
                             Text(
-                                text = model, 
-                                color = colors.textPrimary, 
-                                fontSize = 15.sp, 
+                                text = model,
+                                color = colors.textPrimary,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
                                 textAlign = TextAlign.End,
                                 modifier = Modifier.weight(1f)
                             )
                         }
-                        
+
                         Divider(color = colors.darkShadow.copy(alpha = 0.05f), thickness = 1.dp)
-                        
+
                         LightInfoRow("VERSION", "v$version")
                         LightInfoRow("LINK", if (isConnected) "Connected" else "Not Connected")
                         LightInfoRow(
@@ -2172,7 +2188,7 @@ fun DeviceInfoDialog(
                         onClick = onDismiss,
                         colors = ButtonDefaults.buttonColors(containerColor = colors.textPrimary),
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
-                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                        modifier = Modifier.fillMaxWidth().height(40.dp)
                     ) {
                         Text("CLOSE", color = colors.background, fontWeight = FontWeight.Bold) // Inverted for button
                     }
